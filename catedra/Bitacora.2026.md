@@ -38,3 +38,28 @@ Visualizacion de datos I
 La presentación esta disponible [aqui](https://github.com/adigenova/uohdm/blob/main/catedra/MD_W2C03.pdf)
 
 
+## Clase 5: 21/04/2026
+
+Visualizacion de datos II
+
+### PDF clase
+
+La presentación esta disponible [aqui](https://github.com/adigenova/uohdm/blob/main/catedra/MD_W3C01.pdf)
+
+### Codigo
+
+El codigo visto en clases esta [aqui](https://github.com/adigenova/uohdm/blob/main/code/practico1_ggplot2_flight.ipynb)
+
+## Clase 6: 23/04/2026
+
+Visualizacion de datos II
+
+### PDF clase
+
+La presentación esta disponible [aqui](https://github.com/adigenova/uohdm/blob/main/catedra/MD_W3C01.pdf)
+
+### Codigo
+
+El codigo visto en clases esta [aqui](https://github.com/adigenova/uohdm/blob/main/code/practico1_ggplot2_flight.ipynb)
+
+
