@@ -73,7 +73,42 @@ La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blo
 El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/taller_testing_estadistico.ipynb)
 
 
-## Clase 10: 05/05/2026 
+## Clase 10 y 11: 05/05/2026 - 07/05/2026  
+Modelos Lineales
+
+### PDF clase
+
+La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD-W05-C01.pdf)
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/modelos_lineales_y_regresion_logistica_colab.ipynb)
+
+## Clase 12: 12/05/2026 
+Control I
+
+## Clase 13 : 14/05/2026
+
+Regresion logistica
 
 
-## Clase 11: 07/05/2026 
+### PDF clase
+
+La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD-W06-C02.pdf)
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/modelos_lineales_y_regresion_logistica_colab.ipynb)
+
+## Semana Receso 18/05/2026
+
+## Clase 14 y 15 : 26/05/2026 - 28/05/2026 
+Selección Automatica de Variables
+
+### PDF clase
+
+La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD-W07-C01.pdf)
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/Seleccion_automatica_Variables.Rmd)
