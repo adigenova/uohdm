@@ -58,7 +58,7 @@ anova(m2, m3)
 ## stepwise usando AIC
 
 ```{r stepwiseac}
-modelo_full <- lm(mpg ~ wt + hp + cyl + am + qsec + disp + drat + gear + carb,
+modelo_full <- lm(mpg ~ .,
                   data = mtcars)
 modelo_null <- lm(mpg ~ 1, data = mtcars)
 
@@ -254,7 +254,7 @@ summary(modelo_post_lasso)
 ```{r testt}
 set.seed(123)
 df=mtcars
-idx <- createDataPartition(df$mpg, p = 0.75, list = FALSE)
+idx <- createDataPartition(df$mpg, p = 0.7, list = FALSE)
 train <- df[idx, ]
 test  <- df[-idx, ]
 #modelos
@@ -276,7 +276,7 @@ full = lm(mpg ~ wt + hp + am + qsec + cyl + disp + drat, data = train)
 # Ejemplo Completo
 
 ```{r casas}
-install.packages("AmesHousing")
+#install.packages("AmesHousing")
 library(AmesHousing)
 
 casas <- make_ames()
@@ -432,7 +432,7 @@ comparacion_lm %>%
 ```
 ANOVA
 ```{r anov}
-anova(modelo_simple, modelo_multiple, modelo_full)
+anova(modelo_multiple, modelo_full)
 ```
 
 Seleccion Stepwise
@@ -526,7 +526,7 @@ modelo_lasso <- cv.glmnet(
   standardize = TRUE
 )
 
-plot(modelo_lasso)
+#plot(modelo_lasso)
 
 coef_lasso <- coef(
   modelo_lasso,
@@ -550,7 +550,7 @@ coef_lasso_df
 
 mayor penalizacion
 ```{r p2l}
-lambda_mas_fuerte <- modelo_lasso$lambda.1se * 2
+lambda_mas_fuerte <- modelo_lasso$lambda.1se * 3
 
 coef_lasso_fuerte <- coef(modelo_lasso, s = lambda_mas_fuerte)
 

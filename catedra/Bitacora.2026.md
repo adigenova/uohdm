@@ -112,3 +112,13 @@ La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blo
 ### Código
 
 El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/Seleccion_automatica_Variables.Rmd)
+
+## Clase 16: 02/06/2026
+
+PCA I
+
+### PDF clase
+
+La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD-W08-C01.pdf)
+
+
