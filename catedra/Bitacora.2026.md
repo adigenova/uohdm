@@ -121,4 +121,12 @@ PCA I
 
 La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD-W08-C01.pdf)
 
+## Clase 17: 04/06/2026
+
+PCA I
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/PCA_md_R.Rmd)
+
 
