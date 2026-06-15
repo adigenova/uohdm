@@ -276,8 +276,10 @@ p1 / p2
 ```{r components-80-90}
 n80 <- which(pca_var_cum >= 0.80)[1]
 n90 <- which(pca_var_cum >= 0.90)[1]
+n50 <- which(pca_var_cum >= 0.50)[1]
 
 tibble(
+  componentes_50 = n50,
   componentes_80 = n80,
   componentes_90 = n90
 )
@@ -559,8 +561,13 @@ outlier_recon %>%
   head(10)
 ```
 
+```{r rcons}
+head(outlier_recon)
+dim(outlier_recon)
+```
+
 ```{r reconstruction-outlier-plot}
-threshold <- quantile(outlier_recon$reconstruction_error, 0.95)
+threshold <- quantile(outlier_recon$reconstruction_error, 0.99)
 
 outlier_recon %>%
   mutate(is_outlier = reconstruction_error >= threshold) %>%
@@ -606,20 +613,25 @@ Compararemos:
 
 
 ```{r regression-data}
+# limpio los nombres y agrego log10 del precio de venta. y saco el Sales_Price
+# y selecciono las variables numericas (where(is.numeric))
 ames_model <- ames_raw %>%
   mutate(log_Sale_Price = log10(Sale_Price)) %>%
   dplyr::select(log_Sale_Price, where(is.numeric)) %>%
   dplyr::select(-Sale_Price) %>%
   janitor::clean_names()
 
+# reemplazo los na por la mediana
 ames_model <- ames_model %>%
   dplyr::select(where(~ n_distinct(.x, na.rm = TRUE) > 1)) %>%
   mutate(across(everything(), ~ ifelse(is.na(.x), median(.x, na.rm = TRUE), .x)))
 
 set.seed(123)
+# selecciono el 70%de los datos
 idx <- sample(seq_len(nrow(ames_model)), size = floor(0.70 * nrow(ames_model)))
-
+# selecciono el 70% de las filas del data.frame
 ames_train <- ames_model[idx, ]
+# selecciono el otro 30% notar -idx
 ames_test <- ames_model[-idx, ]
 
 x_train <- ames_train %>% dplyr::select(-log_sale_price)
@@ -680,7 +692,7 @@ pca_train <- prcomp(
 
 var_pcr <- pca_train$sdev^2 / sum(pca_train$sdev^2)
 cum_pcr <- cumsum(var_pcr)
-k90 <- which(cum_pcr >= 0.80)[1]
+k90 <- which(cum_pcr >= 0.9)[1]
 
 k90
 ```
@@ -699,7 +711,7 @@ pred_pcr_90 <- predict(lm_pcr_90, newdata = test_pcs_90)
 metrics_pcr_90 <- regression_metrics(
   y_test,
   pred_pcr_90,
-  paste0("PCAR 90% varianza, ", k90, " PCs")
+  paste0("PCAR 80% varianza, ", k90, " PCs")
 )
 
 metrics_pcr_90
@@ -1238,6 +1250,8 @@ y <- 3*x1 + 3*x2 + rnorm(n, sd = 1)
 sim_data <- tibble(x1, x2, x3, y)
 
 cor(sim_data)
+
+simple_model=lm(y ~ x2, data=sim_data)
 ```
 
 ```{r collinearity-pca}
@@ -1262,6 +1276,17 @@ lm_pca_sim <- lm(y ~ PC1 + PC2, data = sim_scores)
 
 summary(lm_original_sim)
 summary(lm_pca_sim)
+
+
+lm_one_pc=lm(y~PC1, data=sim_scores)
+
+lm_one_pc=lm(y~PC2, data=sim_scores)
+
+
+sim_scores %>% ggplot(aes(x=PC1,y=PC2)) + geom_point()
+
+sim_data %>% ggplot(aes(x=x1,y=x3)) + geom_point()
+
 ```
 
 **Discusión.**  
@@ -1326,7 +1351,7 @@ spca_res <- elasticnet::spca(
 spca_loadings <- as.data.frame(spca_res$loadings) %>%
   rownames_to_column("variable")
 
-spca_loadings
+spca_loadings %>% arrange(desc(abs(PC2)))
 ```
 
 
