@@ -1,0 +1,937 @@
+---
+title: "Introducción al clustering en R"
+author: "Minería de Datos"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+    toc_float: true
+    number_sections: true
+subtitle: "K-means, clustering jerárquico, evaluación de clusters, PCA antes de clustering,
+  pruebas estadísticas y predicción de membresía"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+# 1. Objetivos de aprendizaje
+
+En este notebook aprenderemos a:
+
+1. Preparar un conjunto de datos para análisis de clustering.
+2. Aplicar **k-means** y **clustering jerárquico**.
+3. Evaluar el **número óptimo de clusters** usando el método del codo, silhouette y gap statistic.
+4. Realizar clustering **después de PCA** y compararlo con clustering sobre las variables originales escaladas.
+5. Describir, visualizar e interpretar clusters.
+6. Aplicar pruebas estadísticas para comparar variables entre clusters.
+7. Entrenar modelos de regresión para **predecir la membresía a clusters**.
+
+Usaremos el dataset `iris`, que viene incluido en R. Es un dataset simple, limpio y disponible en cualquier instalación de R. La variable `Species` se usará solo como referencia externa después del clustering, no para construir los clusters.
+
+# 2. Instalar y cargar paquetes
+
+```{r packages}
+packages <- c(
+  "tidyverse",
+  "cluster",
+  "factoextra",
+  "broom",
+  "nnet"
+)
+
+to_install <- packages[!sapply(packages, requireNamespace, quietly = TRUE)]
+
+if (length(to_install) > 0) {
+  install.packages(to_install, repos = "https://cloud.r-project.org")
+}
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(broom)
+library(nnet)
+```
+
+# 3. Introducción conceptual
+
+El **clustering** es una técnica de **aprendizaje no supervisado**. Esto significa que no usamos una variable respuesta ni una etiqueta conocida para entrenar el modelo. En cambio, el algoritmo intenta descubrir grupos de observaciones que sean similares entre sí.
+
+Un flujo típico de clustering es:
+
+1. Seleccionar variables relevantes.
+2. Escalar las variables numéricas.
+3. Elegir una métrica de distancia.
+4. Elegir un algoritmo de clustering.
+5. Decidir el número de clusters.
+6. Interpretar los clusters encontrados.
+7. Opcionalmente, usar las etiquetas de cluster como variable respuesta en un modelo predictivo.
+
+Idea importante: el clustering es exploratorio. Los clusters no son automáticamente “grupos biológicos reales”, “segmentos reales de clientes” o “subtipos clínicos reales”. Deben ser interpretados y validados.
+
+# 4. Cargar e inspeccionar los datos
+
+```{r load-data}
+data("iris")
+
+iris_tbl <- as_tibble(iris)
+
+glimpse(iris_tbl)
+summary(iris_tbl)
+```
+
+El dataset contiene cuatro variables numéricas:
+
+- `Sepal.Length`
+- `Sepal.Width`
+- `Petal.Length`
+- `Petal.Width`
+
+Además contiene una etiqueta conocida:
+
+- `Species`
+
+Para construir los clusters usaremos solo las variables numéricas.
+
+```{r select-numeric-data}
+iris_num <- iris_tbl %>%
+  select(Sepal.Length, Sepal.Width, Petal.Length, Petal.Width)
+
+head(iris_num)
+```
+
+# 5. Visualización exploratoria
+
+```{r exploratory-plot}
+ggplot(iris_tbl, aes(x = Petal.Length, y = Petal.Width, color = Species)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Datos iris: largo del pétalo vs ancho del pétalo",
+    x = "Largo del pétalo",
+    y = "Ancho del pétalo",
+    color = "Especie"
+  )
+```
+
+Este gráfico usa las etiquetas conocidas de especie solo para exploración. En un problema real de clustering no supervisado, estas etiquetas generalmente no están disponibles.
+
+# 6. Escalamiento de los datos
+
+La mayoría de los métodos de clustering dependen de distancias. Si las variables tienen escalas muy distintas, las variables con rangos numéricos más grandes pueden dominar el resultado.
+
+Por eso, normalmente escalamos las variables numéricas antes de hacer clustering.
+
+```{r scale-data}
+iris_scaled <- scale(iris_num)
+
+head(iris_scaled)
+```
+
+Verificamos que las variables escaladas tengan media cercana a 0 y desviación estándar cercana a 1.
+
+```{r check-scaling}
+apply(iris_scaled, 2, mean)
+apply(iris_scaled, 2, sd)
+```
+
+# 7. Clustering con k-means
+
+K-means intenta dividir las observaciones en `k` clusters minimizando la suma de cuadrados dentro de cada cluster.
+
+Parámetros principales:
+
+- `centers`: número de clusters.
+- `nstart`: número de inicializaciones aleatorias. Valores más altos suelen dar resultados más estables.
+- `iter.max`: número máximo de iteraciones.
+
+Comenzaremos con `k = 3`.
+
+```{r kmeans-basic}
+set.seed(123)
+
+km3 <- kmeans(
+  x = iris_scaled,
+  centers = 3,
+  nstart = 25
+)
+
+km3
+```
+
+Agregamos las etiquetas de cluster al dataset original.
+
+```{r add-kmeans-clusters}
+iris_clustered <- iris_tbl %>%
+  mutate(cluster_kmeans = factor(km3$cluster))
+
+head(iris_clustered)
+```
+
+Visualizamos los clusters de k-means.
+
+```{r plot-kmeans-clusters}
+ggplot(iris_clustered, aes(x = Petal.Length, y = Petal.Width, color = cluster_kmeans)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Clusters de k-means con k = 3",
+    x = "Largo del pétalo",
+    y = "Ancho del pétalo",
+    color = "Cluster"
+  )
+```
+
+
+# 8. ¿Cómo elegir el número óptimo de clusters?
+
+No existe una respuesta universal. Normalmente combinamos criterios estadísticos, visualización e interpretación del dominio.
+
+Compararemos tres enfoques frecuentes:
+
+1. Método del codo.
+2. Ancho promedio de silhouette.
+3. Gap statistic.
+
+## 8.1 Método del codo
+
+El método del codo analiza la suma total de cuadrados dentro de los clusters. A medida que `k` aumenta, la variabilidad interna disminuye. Buscamos un punto donde la mejora comienza a hacerse menor.
+
+```{r elbow-method}
+set.seed(123)
+
+wss <- map_dbl(1:10, function(k) {
+  kmeans(iris_scaled, centers = k, nstart = 25)$tot.withinss
+})
+
+elbow_tbl <- tibble(
+  k = 1:10,
+  total_within_ss = wss
+)
+
+ggplot(elbow_tbl, aes(x = k, y = total_within_ss)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 1:10) +
+  theme_minimal() +
+  labs(
+    title = "Método del codo",
+    x = "Número de clusters k",
+    y = "Suma total de cuadrados intra-cluster"
+  )
+```
+
+Interpretación: el `k` óptimo suele estar cerca del punto donde la curva comienza a aplanarse.
+
+## 8.2 Método de silhouette
+
+El valor de silhouette mide qué tan similar es una observación a su propio cluster comparado con los otros clusters.
+
+- Valores cercanos a 1 sugieren una buena asignación.
+- Valores cercanos a 0 sugieren clusters solapados.
+- Valores negativos sugieren posible mala asignación.
+
+```{r silhouette-method}
+set.seed(123)
+
+sil_width <- map_dbl(2:10, function(k) {
+  km <- kmeans(iris_scaled, centers = k, nstart = 25)
+  ss <- silhouette(km$cluster, dist(iris_scaled))
+  mean(ss[, 3])
+})
+
+sil_tbl <- tibble(
+  k = 2:10,
+  avg_silhouette_width = sil_width
+)
+
+ggplot(sil_tbl, aes(x = k, y = avg_silhouette_width)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2:10) +
+  theme_minimal() +
+  labs(
+    title = "Ancho promedio de silhouette",
+    x = "Número de clusters k",
+    y = "Ancho promedio de silhouette"
+  )
+```
+
+El mejor `k` según este criterio es el que tiene mayor ancho promedio de silhouette.
+
+```{r best-k-silhouette}
+sil_tbl %>%
+  arrange(desc(avg_silhouette_width))
+```
+
+## 8.3 Gap statistic
+
+El gap statistic compara la dispersión observada dentro de los clusters con la dispersión esperada bajo una distribución nula de referencia.
+
+```{r gap-statistic}
+set.seed(123)
+
+gap_kmeans <- clusGap(
+  x = iris_scaled,
+  FUNcluster = kmeans,
+  K.max = 10,
+  B = 50,
+  nstart = 25
+)
+
+fviz_gap_stat(gap_kmeans) +
+  labs(title = "Gap statistic para k-means")
+```
+
+El gap statistic no siempre coincide con el método del codo o silhouette. En la práctica se combinan varios criterios y se elige una solución que además sea interpretable.
+
+# 9. Modelo final de k-means
+
+Porque `iris` tiene tres especies conocidas, continuaremos con `k = 3`.
+
+```{r final-kmeans}
+set.seed(123)
+
+km_final <- kmeans(
+  x = iris_scaled,
+  centers = 3,
+  nstart = 50
+)
+
+iris_km <- iris_tbl %>%
+  mutate(cluster_kmeans = factor(km_final$cluster))
+
+iris_km %>%
+  count(cluster_kmeans)
+```
+
+Comparamos los clusters con las etiquetas conocidas de especie.
+
+```{r kmeans-vs-species}
+table(
+  Cluster = iris_km$cluster_kmeans,
+  Species = iris_km$Species
+)
+```
+
+Esta tabla no se usa para entrenar el modelo de clustering. Solo sirve como una validación externa exploratoria.
+
+# 10. Clustering jerárquico
+
+El clustering jerárquico construye una estructura en forma de árbol llamada dendrograma.
+
+Dos decisiones importantes son:
+
+1. Métrica de distancia: por ejemplo, distancia euclidiana.
+2. Método de enlace: por ejemplo, complete, average o Ward.
+
+El método de Ward suele ser una buena opción cuando se usa distancia euclidiana y se esperan clusters relativamente compactos.
+
+```{r hierarchical-clustering}
+dist_iris <- dist(iris_scaled, method = "euclidean")
+
+hc_ward <- hclust(dist_iris, method = "ward.D2")
+
+plot(
+  hc_ward,
+  labels = FALSE,
+  hang = -1,
+  main = "Dendrograma de clustering jerárquico",
+  xlab = "",
+  sub = ""
+)
+rect.hclust(hc_ward, k = 3, border = 2:4)
+```
+
+Cortamos el dendrograma en tres clusters.
+
+```{r cut-tree}
+iris_hc <- iris_tbl %>%
+  mutate(cluster_hc = factor(cutree(hc_ward, k = 3)))
+
+iris_hc %>%
+  count(cluster_hc)
+
+table(
+  Cluster = iris_hc$cluster_hc,
+  Species = iris_hc$Species
+)
+```
+
+Visualizamos los clusters jerárquicos.
+
+```{r plot-hierarchical-clusters}
+ggplot(iris_hc, aes(x = Petal.Length, y = Petal.Width, color = cluster_hc)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Clustering jerárquico con enlace de Ward",
+    x = "Largo del pétalo",
+    y = "Ancho del pétalo",
+    color = "Cluster"
+  )
+```
+
+# 11. Clustering después de PCA
+
+PCA puede usarse antes del clustering para:
+
+1. Reducir dimensionalidad.
+2. Disminuir redundancia entre variables correlacionadas.
+3. Reducir ruido.
+4. Visualizar observaciones en un espacio de baja dimensión.
+
+Sin embargo, si se conservan muy pocas componentes, PCA también puede eliminar información útil para el clustering.
+
+## 11.1 Ejecutar PCA
+
+```{r pca}
+pca_iris <- prcomp(
+  iris_scaled,
+  center = FALSE,
+  scale. = FALSE
+)
+
+summary(pca_iris)
+```
+
+Como ya escalamos las variables, usamos `center = FALSE` y `scale. = FALSE`.
+
+## 11.2 Scree plot
+
+```{r scree-plot}
+fviz_eig(
+  pca_iris,
+  addlabels = TRUE,
+  ylim = c(0, 100)
+) +
+  labs(title = "Scree plot del PCA")
+```
+
+## 11.3 Scores del PCA
+
+Los **scores** corresponden a la posición de cada observación en el nuevo sistema de coordenadas definido por las componentes principales.
+
+```{r pca-scores}
+pca_scores <- as_tibble(pca_iris$x) %>%
+  mutate(Species = iris_tbl$Species)
+
+head(pca_scores)
+```
+
+Visualizamos las primeras dos componentes principales.
+
+```{r plot-pca-scores}
+ggplot(pca_scores, aes(x = PC1, y = PC2, color = Species)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Iris en el espacio de PCA",
+    x = "PC1",
+    y = "PC2",
+    color = "Especie"
+  )
+```
+
+## 11.4 Elegir cuántas componentes principales conservar
+
+Una regla común es conservar suficientes componentes para explicar al menos 80% o 90% de la varianza.
+
+```{r pca-variance-table}
+variance_tbl <- tibble(
+  PC = paste0("PC", seq_along(pca_iris$sdev)),
+  eigenvalue = pca_iris$sdev^2
+) %>%
+  mutate(
+    prop_variance = eigenvalue / sum(eigenvalue),
+    cum_variance = cumsum(prop_variance)
+  )
+
+variance_tbl
+```
+
+Elegimos automáticamente el número mínimo de componentes que explica al menos 90% de la varianza.
+
+```{r select-pcs}
+n_pc_90 <- min(which(variance_tbl$cum_variance >= 0.90))
+
+n_pc_90
+
+pca_for_clustering <- pca_scores %>%
+  select(all_of(paste0("PC", 1:n_pc_90)))
+
+head(pca_for_clustering)
+```
+
+## 11.5 Evaluar el número óptimo de clusters usando scores de PCA
+
+Repetimos silhouette, pero ahora usando las componentes principales seleccionadas.
+
+```{r silhouette-pca}
+set.seed(123)
+
+sil_width_pca <- map_dbl(2:10, function(k) {
+  km <- kmeans(pca_for_clustering, centers = k, nstart = 25)
+  ss <- silhouette(km$cluster, dist(pca_for_clustering))
+  mean(ss[, 3])
+})
+
+sil_pca_tbl <- tibble(
+  k = 2:10,
+  avg_silhouette_width = sil_width_pca
+)
+
+ggplot(sil_pca_tbl, aes(x = k, y = avg_silhouette_width)) +
+  geom_line() +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = 2:10) +
+  theme_minimal() +
+  labs(
+    title = "Silhouette usando scores de PCA",
+    x = "Número de clusters k",
+    y = "Ancho promedio de silhouette"
+  )
+
+sil_pca_tbl %>%
+  arrange(desc(avg_silhouette_width))
+```
+
+## 11.6 K-means sobre scores de PCA
+
+Para mantener la comparación con las tres especies conocidas, usaremos `k = 3`.
+
+```{r kmeans-pca-final}
+set.seed(123)
+
+km_pca_final <- kmeans(
+  x = pca_for_clustering,
+  centers = 3,
+  nstart = 50
+)
+
+iris_pca_clustered <- iris_tbl %>%
+  mutate(cluster_pca = factor(km_pca_final$cluster))
+
+iris_pca_clustered %>%
+  count(cluster_pca)
+```
+
+Visualizamos los clusters en el espacio PCA.
+
+```{r plot-pca-clusters}
+pca_cluster_plot_data <- pca_scores %>%
+  mutate(cluster_pca = iris_pca_clustered$cluster_pca)
+
+ggplot(pca_cluster_plot_data, aes(x = PC1, y = PC2, color = cluster_pca)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Clusters construidos sobre componentes principales",
+    x = "PC1",
+    y = "PC2",
+    color = "Cluster"
+  )
+```
+
+Comparamos los clusters basados en PCA con la especie conocida.
+
+```{r pca-clusters-vs-species}
+table(
+  Cluster = iris_pca_clustered$cluster_pca,
+  Species = iris_pca_clustered$Species
+)
+```
+
+# 12. Perfilamiento de clusters
+
+Después de crear clusters, el paso más importante es interpretarlos. Para esto calculamos resúmenes descriptivos por cluster.
+
+```{r cluster-profile-summary}
+cluster_profile <- iris_pca_clustered %>%
+  group_by(cluster_pca) %>%
+  summarise(
+    n = n(),
+    across(
+      .cols = Sepal.Length:Petal.Width,
+      .fns = list(
+        mean = mean,
+        sd = sd,
+        median = median
+      ),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+cluster_profile
+```
+
+Una tabla puede ser útil, pero la visualización facilita la interpretación.
+
+```{r cluster-boxplots}
+iris_pca_clustered %>%
+  pivot_longer(
+    cols = Sepal.Length:Petal.Width,
+    names_to = "variable",
+    values_to = "valor"
+  ) %>%
+  ggplot(aes(x = cluster_pca, y = valor, fill = cluster_pca)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal() +
+  guides(fill = "none") +
+  labs(
+    title = "Distribución de variables originales por cluster basado en PCA",
+    x = "Cluster",
+    y = "Valor"
+  )
+```
+
+# 13. Pruebas estadísticas entre clusters
+
+Podemos evaluar si las variables difieren entre clusters.
+
+Advertencia importante: si los clusters fueron construidos usando las mismas variables que luego se testean, los p-values deben interpretarse como **exploratorios o descriptivos**, no como evidencia confirmatoria estricta. El algoritmo fue diseñado para separar observaciones usando esas variables, por lo que diferencias significativas son esperables.
+
+## 13.1 ANOVA entre clusters
+
+ANOVA evalúa si la media de una variable numérica difiere entre varios grupos.
+
+```{r anova-tests}
+cluster_test_data <- iris_tbl %>%
+  mutate(cluster_pca = iris_pca_clustered$cluster_pca)
+
+anova_results <- cluster_test_data %>%
+  pivot_longer(
+    cols = Sepal.Length:Petal.Width,
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  group_by(variable) %>%
+  summarise(
+    p_value = summary(aov(value ~ cluster_pca))[[1]][["Pr(>F)"]][1],
+    .groups = "drop"
+  ) %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+anova_results
+```
+
+## 13.2 Tamaño de efecto para ANOVA
+
+Un p-value muy pequeño no implica necesariamente un efecto grande. Podemos calcular eta cuadrado:
+
+\[
+\eta^2 = \frac{SS_{\text{entre grupos}}}{SS_{\text{total}}}
+\]
+
+```{r eta-squared-function}
+eta_squared_oneway <- function(data, response, group) {
+  formula_obj <- as.formula(paste(response, "~", group))
+  aov_obj <- aov(formula_obj, data = data)
+  aov_tab <- summary(aov_obj)[[1]]
+
+  ss_between <- aov_tab[1, "Sum Sq"]
+  ss_total <- sum(aov_tab[, "Sum Sq"])
+
+  ss_between / ss_total
+}
+
+eta_results <- tibble(
+  variable = names(iris_num),
+  eta_squared = map_dbl(
+    variable,
+    ~ eta_squared_oneway(cluster_test_data, .x, "cluster_pca")
+  )
+)
+
+eta_results
+```
+
+Interpretación general: valores más altos de `eta_squared` indican que una mayor proporción de la variación de la variable se explica por las diferencias entre clusters.
+
+## 13.3 Pruebas post-hoc
+
+Si ANOVA sugiere diferencias entre clusters, Tukey HSD permite identificar qué pares de clusters difieren.
+
+```{r tukey-example}
+tukey_petal_length <- TukeyHSD(
+  aov(Petal.Length ~ cluster_pca, data = cluster_test_data)
+)
+
+tukey_petal_length
+```
+
+Convertimos el resultado de Tukey a una tabla ordenada.
+
+```{r tukey-tidy}
+broom::tidy(tukey_petal_length)
+```
+
+## 13.4 Alternativa no paramétrica: Kruskal-Wallis
+
+Si los supuestos de normalidad u homogeneidad de varianzas no son razonables, Kruskal-Wallis puede usarse como alternativa no paramétrica.
+
+```{r kruskal-tests}
+kruskal_results <- cluster_test_data %>%
+  pivot_longer(
+    cols = Sepal.Length:Petal.Width,
+    names_to = "variable",
+    values_to = "value"
+  ) %>%
+  group_by(variable) %>%
+  summarise(
+    p_value = kruskal.test(value ~ cluster_pca)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(p_adjusted = p.adjust(p_value, method = "BH"))
+
+kruskal_results
+```
+
+Para comparaciones post-hoc no paramétricas se pueden usar pruebas de Wilcoxon por pares.
+
+```{r pairwise-wilcoxon-example}
+pairwise.wilcox.test(
+  x = cluster_test_data$Petal.Length,
+  g = cluster_test_data$cluster_pca,
+  p.adjust.method = "BH"
+)
+```
+
+## 13.5 Validación externa con una variable categórica
+
+Como `iris` tiene una etiqueta conocida de especie, podemos evaluar si la membresía al cluster está asociada con la especie.
+
+```{r chi-square-clusters-species}
+cluster_species_table <- table(
+  Cluster = cluster_test_data$cluster_pca,
+  Species = cluster_test_data$Species
+)
+
+cluster_species_table
+
+chisq.test(cluster_species_table)
+```
+
+Interpretación: esta prueba evalúa si la distribución de especies difiere entre clusters. En datasets sin etiquetas conocidas, este paso no está disponible.
+
+# 14. Regresión para predecir membresía a clusters
+
+Una vez definidos los clusters, podemos entrenar un modelo supervisado para predecir la asignación de cluster en nuevas observaciones.
+
+Esto puede ser útil cuando:
+
+1. El procedimiento de clustering es costoso o complejo.
+2. Queremos una aproximación predictiva simple de los grupos encontrados.
+3. Queremos entender qué variables ayudan a clasificar observaciones en clusters.
+
+Nota: el modelo de regresión predice las etiquetas creadas por el algoritmo de clustering. Esto no demuestra que los clusters sean biológica, clínica o comercialmente reales.
+
+## 14.1 Preparar conjuntos de entrenamiento y prueba
+
+Predeciremos la membresía al cluster basado en PCA usando las cuatro variables originales.
+
+```{r train-test-split}
+set.seed(123)
+
+model_data <- iris_tbl %>%
+  mutate(cluster_pca = iris_pca_clustered$cluster_pca) %>%
+  select(cluster_pca, Sepal.Length, Sepal.Width, Petal.Length, Petal.Width)
+
+train_index <- sample(seq_len(nrow(model_data)), size = 0.70 * nrow(model_data))
+
+train_data <- model_data[train_index, ]
+test_data  <- model_data[-train_index, ]
+
+train_data %>% count(cluster_pca)
+test_data %>% count(cluster_pca)
+```
+
+## 14.2 Regresión logística multinomial
+
+Como la variable respuesta tiene más de dos clases, usamos regresión logística multinomial.
+
+```{r multinomial-regression}
+multinom_model <- multinom(
+  cluster_pca ~ Sepal.Length + Sepal.Width + Petal.Length + Petal.Width,
+  data = train_data,
+  trace = FALSE
+)
+
+summary(multinom_model)
+```
+
+## 14.3 Predecir clusters en el conjunto de prueba
+
+```{r predict-multinomial}
+test_pred <- test_data %>%
+  mutate(
+    predicted_cluster = predict(multinom_model, newdata = test_data, type = "class")
+  )
+
+head(test_pred)
+```
+
+## 14.4 Matriz de confusión y accuracy
+
+```{r confusion-matrix}
+conf_mat <- table(
+  Observado = test_pred$cluster_pca,
+  Predicho = test_pred$predicted_cluster
+)
+
+conf_mat
+
+accuracy <- mean(test_pred$cluster_pca == test_pred$predicted_cluster)
+
+accuracy
+```
+
+## 14.5 Probabilidades de predicción
+
+```{r prediction-probabilities}
+pred_probs <- predict(multinom_model, newdata = test_data, type = "probs")
+
+head(pred_probs)
+```
+
+Agregamos la probabilidad máxima predicha al conjunto de prueba. Esto puede interpretarse como una medida de confianza del modelo.
+
+```{r prediction-confidence}
+test_pred_with_confidence <- test_pred %>%
+  mutate(max_probability = apply(pred_probs, 1, max))
+
+test_pred_with_confidence %>%
+  arrange(max_probability) %>%
+  head(10)
+```
+
+Las observaciones con menor probabilidad máxima son aquellas donde el modelo está más inseguro.
+
+## 14.6 Regresión logística uno-contra-el-resto
+
+Una interpretación más simple puede obtenerse modelando la probabilidad de pertenecer a un cluster específico versus todos los demás.
+
+Aquí modelaremos la membresía al cluster 1.
+
+```{r one-vs-rest}
+binary_data <- model_data %>%
+  mutate(is_cluster_1 = if_else(cluster_pca == "1", 1, 0))
+
+binary_model <- glm(
+  is_cluster_1 ~ Sepal.Length + Sepal.Width + Petal.Length + Petal.Width,
+  data = binary_data,
+  family = binomial()
+)
+
+summary(binary_model)
+```
+
+Los odds ratios son más fáciles de interpretar que los coeficientes en log-odds.
+
+
+
+# 15. Resumen del flujo completo
+
+El flujo completo fue:
+
+1. Seleccionar variables numéricas.
+2. Escalar las variables.
+3. Explorar clustering con k-means y clustering jerárquico.
+4. Elegir el número de clusters usando codo, silhouette y gap statistic.
+5. Ejecutar PCA.
+6. Crear clusters usando componentes principales seleccionadas.
+7. Perfilar e interpretar los clusters.
+8. Comparar estadísticamente las variables entre clusters.
+9. Usar regresión logística multinomial para predecir la membresía a cluster.
+
+# 16. Ejercicios 
+
+## Ejercicio 1: Comparar k-means y clustering jerárquico
+
+Usando las variables escaladas de `iris`:
+
+1. Ejecuta k-means con `k = 2`, `k = 3` y `k = 4`.
+2. Compara el ancho promedio de silhouette.
+3. ¿Qué valor de `k` elegirías? Justifica tu respuesta.
+
+## Ejercicio 2: Clustering basado en PCA
+
+1. Ejecuta PCA sobre las variables escaladas de `iris`.
+2. Conserva solo las dos primeras componentes principales.
+3. Ejecuta k-means con `k = 3` sobre esas dos componentes.
+4. Compara esa solución con el clustering usando suficientes componentes para explicar al menos 90% de la varianza.
+
+## Ejercicio 3: Interpretación estadística
+
+Usando los clusters basados en PCA:
+
+1. Compara `Sepal.Length`, `Sepal.Width`, `Petal.Length` y `Petal.Width` entre clusters usando ANOVA.
+2. Repite usando Kruskal-Wallis.
+3. ¿Las conclusiones son similares?
+4. ¿Por qué los p-values deben interpretarse con cuidado después de hacer clustering?
+
+## Ejercicio 4: Predecir membresía a cluster
+
+1. Entrena un modelo de regresión logística multinomial para predecir las etiquetas de cluster.
+2. Divide los datos en 70% entrenamiento y 30% prueba.
+3. Reporta la matriz de confusión y el accuracy.
+4. ¿Qué variables parecen más útiles para la predicción?
+
+## Ejercicio 5: Aplicar el flujo a otro dataset
+
+Repite el flujo completo usando `USArrests`.
+
+Pistas:
+
+```{r usarrests-hint, eval=FALSE}
+data("USArrests")
+
+usarrests_tbl <- as_tibble(USArrests, rownames = "State")
+
+usarrests_num <- USArrests
+
+usarrests_scaled <- scale(usarrests_num)
+```
+
+Preguntas:
+
+1. ¿Cuál parece ser el número óptimo de clusters?
+2. ¿Qué representan los clusters?
+3. ¿Qué variables difieren más entre clusters?
+4. ¿Puedes predecir la membresía a cluster usando regresión logística multinomial?
+
+# 17. Ejercicios avanzados
+
+## Estabilidad de clusters mediante bootstrap
+
+Una debilidad del clustering es que los resultados pueden ser inestables. Un análisis más avanzado consiste en repetir el clustering muchas veces usando muestras bootstrap y evaluar si grupos similares aparecen de forma repetida.
+
+Algunos paquetes útiles para evaluar estabilidad de clusters son:
+
+- `fpc`
+- `clValid`
+- `mclust`
+
+En este notebook introductorio no los usaremos para evitar agregar complejidad, pero son útiles para proyectos más avanzados.
+
+# 18. Notas finales
+
+Un buen análisis de clustering no consiste solo en correr un algoritmo. Un análisis sólido debería responder:
+
+1. ¿Los clusters son visual y estadísticamente coherentes?
+2. ¿Los clusters son estables?
+3. ¿Son interpretables?
+4. ¿Son útiles para predicción o toma de decisiones?
+5. ¿Tienen sentido en el contexto científico, clínico o de negocio?
+
