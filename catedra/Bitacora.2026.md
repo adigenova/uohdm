@@ -154,5 +154,7 @@ Clustering I
 
 La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/MD_W09-C01.pdf)
 
+### Código
 
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/intro_clustering_Rnotebook.Rmd)
 
