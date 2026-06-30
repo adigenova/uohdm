@@ -1,0 +1,362 @@
+---
+title: "Análisis de asociación: ejemplos en R"
+author: ""
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+
+required_pkgs <- c("arules", "arulesViz", "dplyr", "ggplot2", "tibble")
+missing_pkgs <- required_pkgs[!required_pkgs %in% rownames(installed.packages())]
+
+if (length(missing_pkgs) > 0) {
+  install.packages(missing_pkgs, dependencies = TRUE)
+}
+
+#install.packages("remotes", repos = "https://cloud.r-project.org")
+
+# remotes::install_version(
+#   "arules",
+#   version = "1.7-9",
+#   repos = "https://cloud.r-project.org"
+# )
+
+#library(arules)
+
+library(arules)
+library(arulesViz)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+```
+
+# Ejemplo 1: base transaccional pequeña
+
+```{r datos-pequenos}
+transacciones_lista <- list(
+  c("pan", "leche", "huevos"),
+  c("pan", "leche"),
+  c("pan", "mantequilla"),
+  c("leche", "huevos"),
+  c("pan", "leche", "mantequilla"),
+  c("pan", "huevos"),
+  c("leche", "mantequilla"),
+  c("pan", "leche", "huevos", "mantequilla")
+)
+
+transacciones <- as(transacciones_lista, "transactions")
+transacciones
+summary(transacciones)
+inspect(transacciones)
+```
+
+```{r matriz-items}
+matriz_items <- as(transacciones, "matrix")
+matriz_items
+```
+
+```{r frecuencia-items}
+itemFrequency(transacciones, type = "absolute")
+itemFrequency(transacciones, type = "relative")
+
+itemFrequencyPlot(
+  transacciones,
+  topN = 10,
+  type = "absolute",
+  main = "Frecuencia absoluta de ítems"
+)
+```
+
+# Ejemplo 2: cálculo manual de métricas
+
+```{r metricas-manuales}
+n <- length(transacciones)
+X <- "pan"
+Y <- "leche"
+
+mat <- as(transacciones, "matrix")
+
+soporte_X <- sum(mat[, X]) / n
+soporte_Y <- sum(mat[, Y]) / n
+soporte_XY <- sum(mat[, X] & mat[, Y]) / n
+
+confianza_X_Y <- soporte_XY / soporte_X
+lift_X_Y <- confianza_X_Y / soporte_Y
+leverage_X_Y <- soporte_XY - soporte_X * soporte_Y
+conviction_X_Y <- (1 - soporte_Y) / (1 - confianza_X_Y)
+
+metricas <- tibble(
+  regla = paste(X, "=>", Y),
+  soporte_X = soporte_X,
+  soporte_Y = soporte_Y,
+  soporte_XY = soporte_XY,
+  confianza = confianza_X_Y,
+  lift = lift_X_Y,
+  leverage = leverage_X_Y,
+  conviction = conviction_X_Y
+)
+
+metricas
+```
+
+```{r tabla-contingencia-manual}
+tabla_XY <- table(
+  X_presente = mat[, X],
+  Y_presente = mat[, Y]
+)
+
+tabla_XY
+fisher.test(tabla_XY)
+chisq.test(tabla_XY, correct = FALSE)
+```
+
+# Ejemplo 3: reglas con Apriori
+
+```{r apriori-pequeno}
+reglas <- apriori(
+  transacciones,
+  parameter = list(
+    supp = 0.25,
+    conf = 0.60,
+    minlen = 2
+  )
+)
+
+reglas
+summary(reglas)
+inspect(reglas)
+```
+
+```{r ordenar-reglas}
+reglas_lift <- sort(reglas, by = "lift", decreasing = TRUE)
+inspect(reglas_lift[1:min(10, length(reglas_lift))])
+```
+
+```{r calidad-reglas}
+quality(reglas_lift) %>%
+  as_tibble() %>%
+  arrange(desc(lift))
+```
+
+```{r reglas-dataframe}
+reglas_df <- as(reglas_lift, "data.frame")
+reglas_df
+```
+
+# Ejemplo 4: filtrado de reglas
+
+```{r filtrar-reglas-rhs}
+reglas_leche <- subset(reglas, rhs %in% "leche")
+inspect(sort(reglas_leche, by = "confidence", decreasing = TRUE))
+```
+
+```{r filtrar-reglas-lhs}
+reglas_pan_lhs <- subset(reglas, lhs %in% "pan")
+inspect(sort(reglas_pan_lhs, by = "lift", decreasing = TRUE))
+```
+
+```{r filtrar-por-metricas}
+reglas_fuertes <- subset(reglas, confidence >= 0.7 & lift >= 1)
+inspect(sort(reglas_fuertes, by = "lift", decreasing = TRUE))
+```
+
+# Ejemplo 5: reglas redundantes
+
+```{r reglas-redundantes}
+reglas_ordenadas <- sort(reglas, by = "lift", decreasing = TRUE)
+redundantes <- is.redundant(reglas_ordenadas)
+
+reglas_no_redundantes <- reglas_ordenadas[!redundantes]
+
+length(reglas_ordenadas)
+length(reglas_no_redundantes)
+inspect(reglas_no_redundantes)
+```
+
+# Ejemplo 6: itemsets frecuentes con Apriori
+
+```{r itemsets-frecuentes-apriori}
+itemsets_apriori <- apriori(
+  transacciones,
+  parameter = list(
+    target = "frequent itemsets",
+    supp = 0.25,
+    minlen = 1
+  )
+)
+
+itemsets_apriori <- sort(itemsets_apriori, by = "support", decreasing = TRUE)
+inspect(itemsets_apriori)
+```
+
+# Ejemplo 7: itemsets frecuentes con Eclat
+
+```{r itemsets-frecuentes-eclat}
+itemsets_eclat <- eclat(
+  transacciones,
+  parameter = list(
+    supp = 0.25,
+    minlen = 1
+  )
+)
+
+itemsets_eclat <- sort(itemsets_eclat, by = "support", decreasing = TRUE)
+inspect(itemsets_eclat)
+```
+
+# Ejemplo 8: visualización de reglas
+
+```{r visualizacion-reglas, fig.width=8, fig.height=5}
+plot(reglas_lift, method = "scatterplot")
+```
+
+```{r visualizacion-grafo, fig.width=8, fig.height=6}
+plot(
+  reglas_lift[1:min(10, length(reglas_lift))],
+  method = "graph",
+  engine = "htmlwidget"
+)
+```
+
+# Ejemplo 9: dataset Groceries
+
+```{r groceries-carga}
+data("Groceries")
+Groceries
+summary(Groceries)
+```
+
+```{r groceries-frecuencia}
+itemFrequencyPlot(
+  Groceries,
+  topN = 20,
+  type = "absolute",
+  main = "Top 20 productos más frecuentes"
+)
+```
+
+```{r groceries-apriori}
+reglas_groceries <- apriori(
+  Groceries,
+  parameter = list(
+    supp = 0.005,
+    conf = 0.30,
+    minlen = 2,
+    maxlen = 5
+  )
+)
+
+reglas_groceries
+summary(reglas_groceries)
+```
+
+```{r groceries-top-lift}
+reglas_groceries_lift <- sort(reglas_groceries, by = "lift", decreasing = TRUE)
+inspect(reglas_groceries_lift[1:20])
+```
+
+```{r groceries-top-confianza}
+reglas_groceries_conf <- sort(reglas_groceries, by = "confidence", decreasing = TRUE)
+inspect(reglas_groceries_conf[1:20])
+```
+
+```{r groceries-filtrar-consecuente}
+reglas_whole_milk <- subset(reglas_groceries, rhs %in% "whole milk")
+reglas_whole_milk <- sort(reglas_whole_milk, by = "lift", decreasing = TRUE)
+inspect(reglas_whole_milk[1:20])
+```
+
+```{r groceries-no-redundantes}
+reglas_groceries_nr <- reglas_groceries_lift[!is.redundant(reglas_groceries_lift)]
+
+length(reglas_groceries_lift)
+length(reglas_groceries_nr)
+inspect(reglas_groceries_nr[1:20])
+```
+
+```{r groceries-dataframe}
+reglas_groceries_df <- as(reglas_groceries_nr, "data.frame")
+head(reglas_groceries_df, 20)
+```
+
+# Ejemplo 10: Eclat con Groceries
+
+```{r groceries-eclat}
+itemsets_groceries <- eclat(
+  Groceries,
+  parameter = list(
+    supp = 0.01,
+    minlen = 2,
+    maxlen = 4
+  )
+)
+
+itemsets_groceries <- sort(itemsets_groceries, by = "support", decreasing = TRUE)
+inspect(itemsets_groceries[1:20])
+```
+
+# Ejemplo 13: grid de parámetros
+
+```{r grid-parametros}
+parametros <- expand.grid(
+  supp = c(0.001, 0.005, 0.01),
+  conf = c(0.2, 0.4, 0.6)
+)
+
+resultados_grid <- parametros %>%
+  rowwise() %>%
+  mutate(
+    n_reglas = length(
+      apriori(
+        Groceries,
+        parameter = list(
+          supp = supp,
+          conf = conf,
+          minlen = 2,
+          maxlen = 5
+        ),
+        control = list(verbose = FALSE)
+      )
+    )
+  ) %>%
+  ungroup()
+
+resultados_grid
+```
+
+```{r plot-grid-parametros}
+ggplot(resultados_grid, aes(x = supp, y = n_reglas, group = factor(conf))) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ conf, labeller = label_both) +
+  labs(
+    x = "Soporte mínimo",
+    y = "Número de reglas",
+    title = "Número de reglas según soporte y confianza"
+  )
+```
+
+# Ejemplo 14: exportar reglas
+
+```{r exportar-reglas, eval=FALSE}
+write(reglas_groceries_nr, file = "reglas_groceries.csv", sep = ",", quote = TRUE)
+
+reglas_export <- as(reglas_groceries_nr, "data.frame")
+write.csv(reglas_export, "reglas_groceries_dataframe.csv", row.names = FALSE)
+```
+

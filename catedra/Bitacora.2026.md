@@ -172,8 +172,16 @@ El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob
 
 ### Clase 22: 30/06/2026
 
+Analisis de asociacion 1
 
 
+### PDF clase
+
+La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/analisis_asociacionI.pdf)
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/analisis_asociacion_I.Rmd)
 
 
 

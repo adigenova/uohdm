@@ -1,0 +1,1119 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{caption}[numbered]
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{amsmath, amssymb, booktabs, array}
+\usepackage{tikz}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codekw}{RGB}{30,70,140}
+\definecolor{codestr}{RGB}{140,70,30}
+\definecolor{codecom}{RGB}{80,120,80}
+\definecolor{darkblue}{RGB}{25,55,95}
+
+\lstdefinestyle{Rstyle}{
+  language=R,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecom},
+  stringstyle=\color{codestr},
+  backgroundcolor=\color{codebg},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\title[Análisis de asociación]{Análisis de asociación}
+\subtitle{Reglas de asociación, algoritmos clásicos y ejemplos en R}
+\author{Minería de Datos}
+\institute{Clase práctica}
+\date{\today}
+
+\begin{document}
+
+%------------------------------------------------
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Objetivos de la clase}
+\begin{itemize}
+  \item Comprender el problema de descubrir asociaciones frecuentes en datos transaccionales.
+  \item Definir itemsets, reglas, soporte, confianza, lift y otras medidas de interés.
+  \item Revisar los algoritmos clásicos: Apriori, Eclat y FP-Growth.
+  \item Implementar un flujo de trabajo en R usando \texttt{arules} y \texttt{arulesViz}.
+  \item Interpretar reglas de asociación y discutir sus limitaciones.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Motivación: de datos a patrones}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\textbf{Pregunta central:}\vspace{0.2cm}
+
+¿Qué elementos tienden a aparecer juntos más frecuentemente de lo esperado?
+
+\vspace{0.3cm}
+\begin{itemize}
+  \item Canasta de compras: pan, leche, mantequilla.
+  \item Diagnóstico: síntomas, exámenes y enfermedad.
+  \item Web: páginas visitadas en una misma sesión.
+  \item Biología: genes, mutaciones o rutas alteradas en conjunto.
+\end{itemize}
+
+\column{0.42\textwidth}
+\begin{block}{Idea}
+Una regla de asociación resume una relación condicional frecuente:
+\[
+A \Rightarrow B
+\]
+``si aparece A, también suele aparecer B''.
+\end{block}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Datos transaccionales}
+\begin{table}
+\centering
+\begin{tabular}{cl}
+\toprule
+Transacción & Ítems observados \\
+\midrule
+T1 & pan, leche, huevos \\
+T2 & pan, mantequilla \\
+T3 & leche, huevos, cereal \\
+T4 & pan, leche, mantequilla \\
+T5 & pan, leche, huevos, mantequilla \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.3cm}
+Cada fila representa una unidad de análisis; cada ítem puede estar presente o ausente. El formato usual es una matriz binaria dispersa: muchas columnas, muchos ceros.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Conceptos básicos}
+\begin{block}{Ítem e itemset}
+Un \textbf{ítem} es una característica discreta. Un \textbf{itemset} es un conjunto de ítems, por ejemplo \{pan, leche\}.
+\end{block}
+
+\begin{block}{Regla de asociación}
+Una regla se escribe como:
+\[
+X \Rightarrow Y, \quad X \cap Y = \emptyset
+\]
+Donde $X$ es el antecedente y $Y$ el consecuente.
+\end{block}
+
+\begin{exampleblock}{Ejemplo}
+\[
+\{pan, mantequilla\} \Rightarrow \{leche\}
+\]
+Interpretación: entre las transacciones con pan y mantequilla, una fracción relevante también contiene leche.
+\end{exampleblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Soporte}
+\textbf{Soporte de un itemset:} proporción de transacciones que contienen ese conjunto.
+\[
+\text{support}(X) = \frac{\#(X)}{N}
+\]
+
+\vspace{0.3cm}
+\textbf{Soporte de una regla:}
+\[
+\text{support}(X \Rightarrow Y) = \text{support}(X \cup Y)
+\]
+
+\begin{block}{Interpretación}
+El soporte mide frecuencia absoluta relativa. Es útil para filtrar patrones demasiado raros, aunque patrones raros pueden ser importantes en algunos dominios.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Confianza}
+\textbf{Confianza:} probabilidad empírica de observar $Y$ dado que se observa $X$.
+\[
+\text{confidence}(X \Rightarrow Y) = \frac{\text{support}(X \cup Y)}{\text{support}(X)}
+\]
+
+\begin{exampleblock}{Ejemplo}
+Si 40\% de las transacciones tienen pan y 30\% tienen pan y leche:
+\[
+\text{confidence}(\{pan\} \Rightarrow \{leche\}) = \frac{0.30}{0.40} = 0.75
+\]
+\end{exampleblock}
+
+\begin{alertblock}{Cuidado}
+Una confianza alta no implica que la asociación sea interesante: el consecuente puede ser muy frecuente por sí solo.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Lift}
+\textbf{Lift:} compara la co-ocurrencia observada con la esperada bajo independencia.
+\[
+\text{lift}(X \Rightarrow Y)=\frac{\text{confidence}(X \Rightarrow Y)}{\text{support}(Y)}
+\]
+
+\begin{itemize}
+  \item $\text{lift} = 1$: X e Y aparecen juntos como se esperaría por azar.
+  \item $\text{lift} > 1$: asociación positiva.
+  \item $\text{lift} < 1$: asociación negativa.
+\end{itemize}
+
+\begin{block}{Idea clave}
+El lift corrige parcialmente el problema de consecuentes muy frecuentes.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Otras medidas de interés}
+\begin{table}
+\centering
+\begin{tabular}{p{0.22\textwidth}p{0.62\textwidth}}
+\toprule
+Medida & Uso principal \\
+\midrule
+Leverage & Diferencia entre co-ocurrencia observada y esperada. \\
+Conviction & Mide cuánto se reduce el error al usar la regla. \\
+Coverage & Proporción de transacciones cubiertas por el antecedente. \\
+Chi-cuadrado & Evalúa independencia entre antecedente y consecuente. \\
+Fisher exacto & Alternativa para tablas pequeñas o eventos raros. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\vspace{0.2cm}
+En la práctica se combinan varias medidas: soporte mínimo, confianza mínima, lift alto y una interpretación coherente con el dominio.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Propiedad antimonótona del soporte}
+\begin{block}{Principio clave}
+Si un itemset no es frecuente, ningún superconjunto suyo puede ser frecuente.
+\end{block}
+
+\[
+\text{support}(X \cup Z) \leq \text{support}(X)
+\]
+
+\vspace{0.3cm}
+\begin{itemize}
+  \item Esta propiedad permite podar el espacio de búsqueda.
+  \item Es la base del algoritmo Apriori.
+  \item Reduce drásticamente el número de combinaciones evaluadas.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Algoritmo Apriori: intuición}
+\begin{enumerate}
+  \item Encontrar todos los ítems frecuentes de tamaño 1.
+  \item Generar candidatos de tamaño 2 combinando ítems frecuentes.
+  \item Eliminar candidatos con subconjuntos no frecuentes.
+  \item Contar soporte en la base de transacciones.
+  \item Repetir para itemsets de tamaño $k$.
+  \item Generar reglas desde los itemsets frecuentes.
+\end{enumerate}
+
+\begin{alertblock}{Costo computacional}
+Apriori puede requerir muchas pasadas sobre los datos y generar muchos candidatos, especialmente con soporte bajo.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Apriori: pseudocódigo}
+\begin{block}{Entrada}
+Base transaccional $D$, soporte mínimo $s_{min}$, confianza mínima $c_{min}$.
+\end{block}
+
+\begin{enumerate}
+  \item $L_1 =$ itemsets frecuentes de tamaño 1.
+  \item Para $k=2,3,\ldots$ mientras $L_{k-1}$ no esté vacío:
+  \begin{enumerate}
+    \item Generar candidatos $C_k$ desde $L_{k-1}$.
+    \item Podar candidatos con subconjuntos no frecuentes.
+    \item Contar soporte de cada candidato en $D$.
+    \item Guardar en $L_k$ los candidatos con soporte $\geq s_{min}$.
+  \end{enumerate}
+  \item A partir de $\cup_k L_k$, generar reglas que cumplen $c_{min}$.
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Algoritmo Eclat}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\textbf{Idea:} representar cada ítem por la lista de transacciones en que aparece.
+
+\vspace{0.2cm}
+\begin{itemize}
+  \item Usa formato vertical.
+  \item El soporte de un itemset se calcula como intersección de listas.
+  \item Suele ser eficiente cuando las listas son manejables.
+\end{itemize}
+
+\column{0.44\textwidth}
+\begin{exampleblock}{Ejemplo}
+\begin{tabular}{ll}
+pan & T1, T2, T4, T5 \\
+leche & T1, T3, T4, T5 \\
+\end{tabular}
+
+\vspace{0.2cm}
+\[
+\{pan, leche\}: T1,T4,T5
+\]
+Soporte $=3/5$.
+\end{exampleblock}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Algoritmo FP-Growth}
+\begin{itemize}
+  \item Evita generar candidatos explícitos como Apriori.
+  \item Comprime la base de transacciones en un árbol de patrones frecuentes: \textbf{FP-tree}.
+  \item Explora bases condicionales para extraer itemsets frecuentes.
+\end{itemize}
+
+\begin{block}{Ventaja}
+Puede ser mucho más rápido que Apriori en bases grandes o densas, porque reduce pasadas por los datos y evita una explosión de candidatos.
+\end{block}
+
+\begin{alertblock}{Consideración}
+La implementación y la estructura de memoria son más complejas que en Apriori.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Comparación conceptual}
+\begin{table}
+\centering
+\begin{tabular}{p{0.2\textwidth}p{0.24\textwidth}p{0.22\textwidth}p{0.2\textwidth}}
+\toprule
+Algoritmo & Representación & Estrategia & Fortalezas \\
+\midrule
+Apriori & Horizontal & Genera y poda candidatos & Simple, interpretable, clásico \\
+Eclat & Vertical & Intersección de tidsets & Eficiente para ciertos datos dispersos \\
+FP-Growth & Árbol comprimido & Crecimiento de patrones & Rápido en bases grandes/densas \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{frame}
+
+
+%------------------------------------------------
+\begin{frame}{Dataset común para cálculo manual}
+\small
+Usaremos el mismo ejemplo para ilustrar los tres algoritmos clásicos.
+
+\vspace{0.15cm}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{table}
+\centering
+\scriptsize
+\begin{tabular}{cl}
+\toprule
+ID & Ítems \\
+\midrule
+T1 & pan, leche, huevos \\
+T2 & pan, mantequilla \\
+T3 & leche, huevos, cereal \\
+T4 & pan, leche, mantequilla \\
+T5 & pan, leche, huevos, mantequilla \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\column{0.45\textwidth}
+\begin{block}{Umbral de trabajo}
+\[
+N=5, \qquad s_{min}=0.40
+\]
+\[
+\text{soporte mínimo en conteo}=0.40 \times 5=2
+\]
+Un itemset es frecuente si aparece en al menos 2 transacciones.
+\end{block}
+\end{columns}
+\end{frame}
+
+
+%================================================
+\section{Cálculo manual de los algoritmos clásicos}
+
+%------------------------------------------------
+\begin{frame}{Cálculo manual: dataset y umbral}
+\scriptsize
+\begin{columns}[T]
+\column{0.48\textwidth}
+\textbf{Base transaccional $D$}
+\begin{table}
+\centering
+\begin{tabular}{cl}
+\toprule
+ID & Compra \\
+\midrule
+T1 & pan, leche, huevos \\
+T2 & pan, mantequilla \\
+T3 & leche, huevos, cereal \\
+T4 & pan, leche, mantequilla \\
+T5 & pan, leche, huevos, mantequilla \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\column{0.46\textwidth}
+\textbf{Parámetros para todos los algoritmos}
+\[
+N=5, \qquad s_{min}=0.40
+\]
+\[
+\text{conteo mínimo}=s_{min}\times N=0.40\times 5=2
+\]
+\begin{block}{Regla de decisión}
+Un itemset se considera frecuente si aparece en \textbf{2 o más} transacciones.
+\end{block}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Apriori a mano I: contar $C_1$ y obtener $L_1$}
+\scriptsize
+\textbf{Idea del algoritmo:} primero contar ítems individuales. Luego solo se combinan los ítems frecuentes.
+
+\vspace{0.15cm}
+\begin{columns}[T]
+\column{0.47\textwidth}
+\begin{table}
+\centering
+\begin{tabular}{lcl}
+\toprule
+Ítem & Conteo & Soporte \\
+\midrule
+pan & 4 & $4/5=0.80$ \\
+leche & 4 & $4/5=0.80$ \\
+huevos & 3 & $3/5=0.60$ \\
+mantequilla & 3 & $3/5=0.60$ \\
+cereal & 1 & $1/5=0.20$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\column{0.48\textwidth}
+\textbf{Aplicando soporte mínimo}
+\[
+L_1=\{pan, leche, huevos, mantequilla\}
+\]
+\[
+cereal \notin L_1 \quad \text{porque} \quad 1 < 2
+\]
+\begin{alertblock}{Poda Apriori}
+Como cereal no es frecuente, ningún itemset que contenga cereal puede ser frecuente.
+\end{alertblock}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Apriori a mano II: generar $C_2$ y obtener $L_2$}
+\scriptsize
+\textbf{Desde $L_1$ se generan candidatos de tamaño 2.} Luego se cuentan en las 5 transacciones.
+
+\begin{table}
+\centering
+\begin{tabular}{lcll}
+\toprule
+Candidato $C_2$ & Conteo & Soporte & Decisión \\
+\midrule
+\{pan, leche\} & 3 & $3/5=0.60$ & frecuente \\
+\{pan, huevos\} & 2 & $2/5=0.40$ & frecuente \\
+\{pan, mantequilla\} & 3 & $3/5=0.60$ & frecuente \\
+\{leche, huevos\} & 3 & $3/5=0.60$ & frecuente \\
+\{leche, mantequilla\} & 2 & $2/5=0.40$ & frecuente \\
+\{huevos, mantequilla\} & 1 & $1/5=0.20$ & se poda \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\[
+L_2=\{\{pan,leche\},\{pan,huevos\},\{pan,mantequilla\},\{leche,huevos\},\{leche,mantequilla\}\}
+\]
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Apriori a mano III: generar $C_3$, podar y calcular reglas}
+\scriptsize
+\begin{columns}[T]
+\column{0.50\textwidth}
+\textbf{Candidatos de tamaño 3}
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Candidato $C_3$ & Conteo & Decisión \\
+\midrule
+\{pan, leche, huevos\} & 2 & queda \\
+\{pan, leche, mantequilla\} & 2 & queda \\
+\{pan, huevos, mantequilla\} & -- & se poda \\
+\{leche, huevos, mantequilla\} & -- & se poda \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Los dos últimos se podan porque contienen:
+\[
+\{huevos,mantequilla\}\notin L_2
+\]
+
+\column{0.46\textwidth}
+\textbf{Ejemplo de regla desde $L_3$}
+\[
+\{pan,huevos\}\Rightarrow\{leche\}
+\]
+\[
+\text{support}=\frac{\#(pan,huevos,leche)}{5}=\frac{2}{5}=0.40
+\]
+\[
+\text{confidence}=\frac{\#(pan,huevos,leche)}{\#(pan,huevos)}=\frac{2}{2}=1.00
+\]
+\[
+\text{lift}=\frac{1.00}{support(leche)}=\frac{1.00}{4/5}=1.25
+\]
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Eclat a mano I: convertir a formato vertical}
+\scriptsize
+\textbf{Idea del algoritmo:} cada ítem guarda el conjunto de transacciones en que aparece.
+
+\begin{table}
+\centering
+\begin{tabular}{llcc}
+\toprule
+Ítem & TIDset & Conteo & Decisión \\
+\midrule
+pan & \{T1,T2,T4,T5\} & 4 & frecuente \\
+leche & \{T1,T3,T4,T5\} & 4 & frecuente \\
+huevos & \{T1,T3,T5\} & 3 & frecuente \\
+mantequilla & \{T2,T4,T5\} & 3 & frecuente \\
+cereal & \{T3\} & 1 & se elimina \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\[
+L_1=\{pan, leche, huevos, mantequilla\}
+\]
+\begin{block}{Diferencia clave con Apriori}
+Eclat calcula soportes mediante \textbf{intersecciones de TIDsets}, no generando y recontando todos los candidatos sobre la tabla original.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Eclat a mano II: intersecciones para obtener itemsets frecuentes}
+\scriptsize
+\begin{columns}[T]
+\column{0.50\textwidth}
+\textbf{Pares frecuentes}
+\begin{align*}
+T(pan)\cap T(leche)&=\{T1,T4,T5\}\Rightarrow 3 \\
+T(pan)\cap T(huevos)&=\{T1,T5\}\Rightarrow 2 \\
+T(pan)\cap T(mantequilla)&=\{T2,T4,T5\}\Rightarrow 3 \\
+T(leche)\cap T(huevos)&=\{T1,T3,T5\}\Rightarrow 3 \\
+T(leche)\cap T(mantequilla)&=\{T4,T5\}\Rightarrow 2 \\
+T(huevos)\cap T(mantequilla)&=\{T5\}\Rightarrow 1
+\end{align*}
+\[
+\{huevos,mantequilla\}\text{ se elimina}
+\]
+
+\column{0.45\textwidth}
+\textbf{Triples por intersección}
+\begin{align*}
+T(pan,leche)\cap T(huevos)
+&=\{T1,T4,T5\}\cap\{T1,T3,T5\}\\
+&=\{T1,T5\}\Rightarrow 2
+\end{align*}
+\[
+\{pan,leche,huevos\}\text{ es frecuente}
+\]
+\begin{align*}
+T(pan,leche)\cap T(mantequilla)
+&=\{T1,T4,T5\}\cap\{T2,T4,T5\}\\
+&=\{T4,T5\}\Rightarrow 2
+\end{align*}
+\[
+\{pan,leche,mantequilla\}\text{ es frecuente}
+\]
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{FP-Growth a mano I: ordenar transacciones frecuentes}
+\scriptsize
+\textbf{Idea del algoritmo:} comprimir la base en un FP-tree. Primero se eliminan ítems no frecuentes y se ordenan por frecuencia global.
+
+\begin{columns}[T]
+\column{0.41\textwidth}
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Ítem & Conteo & Orden \\
+\midrule
+pan & 4 & 1 \\
+leche & 4 & 2 \\
+huevos & 3 & 3 \\
+mantequilla & 3 & 4 \\
+cereal & 1 & eliminado \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\column{0.54\textwidth}
+\begin{table}
+\centering
+\begin{tabular}{lll}
+\toprule
+ID & Original & Ordenada sin cereal \\
+\midrule
+T1 & pan, leche, huevos & pan, leche, huevos \\
+T2 & pan, mantequilla & pan, mantequilla \\
+T3 & leche, huevos, cereal & leche, huevos \\
+T4 & pan, leche, mantequilla & pan, leche, mantequilla \\
+T5 & pan, leche, huevos, mantequilla & pan, leche, huevos, mantequilla \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{FP-Growth a mano II: construir el FP-tree}
+\scriptsize
+\begin{columns}[T]
+\column{0.45\textwidth}
+\textbf{Inserción resumida}
+\begin{enumerate}
+  \item T1 crea la ruta pan-leche-huevos.
+  \item T2 comparte pan y agrega mantequilla bajo pan.
+  \item T3 crea una ruta nueva leche-huevos desde la raíz.
+  \item T4 comparte pan-leche y agrega mantequilla.
+  \item T5 comparte pan-leche-huevos y agrega mantequilla.
+\end{enumerate}
+
+\column{0.50\textwidth}
+\textbf{FP-tree resultante}
+\begin{verbatim}
+raiz
+|- pan:4
+|  |- leche:3
+|  |  |- huevos:2
+|  |  |  `- mantequilla:1
+|  |  `- mantequilla:1
+|  `- mantequilla:1
+`- leche:1
+   `- huevos:1
+\end{verbatim}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{FP-Growth a mano III: bases condicionales y patrones}
+\scriptsize
+\begin{columns}[T]
+\column{0.47\textwidth}
+\textbf{Sufijo: mantequilla}
+\begin{table}
+\centering
+\begin{tabular}{lc}
+\toprule
+Prefijo condicional & Conteo \\
+\midrule
+pan & 1 \\
+pan, leche & 1 \\
+pan, leche, huevos & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Conteos condicionales:
+\[
+pan=3,\quad leche=2,\quad huevos=1
+\]
+Patrones frecuentes:
+\[
+\{pan,mantequilla\}:3,\quad \{leche,mantequilla\}:2
+\]
+\[
+\{pan,leche,mantequilla\}:2
+\]
+
+\column{0.48\textwidth}
+\textbf{Sufijo: huevos}
+\begin{table}
+\centering
+\begin{tabular}{lc}
+\toprule
+Prefijo condicional & Conteo \\
+\midrule
+pan, leche & 2 \\
+leche & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+Conteos condicionales:
+\[
+leche=3,\quad pan=2
+\]
+Patrones frecuentes:
+\[
+\{leche,huevos\}:3,\quad \{pan,huevos\}:2
+\]
+\[
+\{pan,leche,huevos\}:2
+\]
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Resultado manual común de los tres algoritmos}
+\scriptsize
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Itemset frecuente & Conteo & Soporte \\
+\midrule
+\{pan\}, \{leche\} & 4 & 0.80 \\
+\{huevos\}, \{mantequilla\} & 3 & 0.60 \\
+\{pan, leche\} & 3 & 0.60 \\
+\{pan, huevos\} & 2 & 0.40 \\
+\{pan, mantequilla\} & 3 & 0.60 \\
+\{leche, huevos\} & 3 & 0.60 \\
+\{leche, mantequilla\} & 2 & 0.40 \\
+\{pan, leche, huevos\} & 2 & 0.40 \\
+\{pan, leche, mantequilla\} & 2 & 0.40 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{block}{Conclusión}
+Apriori, Eclat y FP-Growth recorren el espacio de búsqueda de forma distinta, pero con el mismo soporte mínimo recuperan los mismos itemsets frecuentes.
+\end{block}
+\end{frame}
+
+
+
+%------------------------------------------------
+\begin{frame}[fragile]{R: paquetes necesarios}
+\begin{lstlisting}[style=Rstyle]
+# Instalar una vez
+install.packages("arules")
+install.packages("arulesViz")
+install.packages("tidyverse")
+
+# Cargar en cada sesion
+library(arules)
+library(arulesViz)
+library(tidyverse)
+\end{lstlisting}
+
+\begin{block}{Paquete central}
+\texttt{arules} implementa estructuras de transacciones, Apriori, Eclat y funciones para inspeccionar reglas.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{R: cargar datos Groceries}
+\begin{lstlisting}[style=Rstyle]
+library(arules)
+data("Groceries")
+
+Groceries
+summary(Groceries)
+itemFrequency(Groceries)[1:10]
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{Groceries} es un dataset transaccional clásico incluido en \texttt{arules}.
+  \item Cada transacción corresponde a una compra.
+  \item Cada ítem corresponde a un producto comprado.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{R: explorar frecuencia de ítems}
+\begin{lstlisting}[style=Rstyle]
+# Frecuencia relativa de items
+freq <- itemFrequency(Groceries, type = "relative")
+head(sort(freq, decreasing = TRUE), 10)
+
+# Grafico de los 20 items mas frecuentes
+itemFrequencyPlot(
+  Groceries,
+  topN = 20,
+  type = "relative",
+  main = "Items mas frecuentes"
+)
+\end{lstlisting}
+
+\begin{block}{Interpretación}
+Antes de generar reglas conviene revisar cuáles ítems dominan el dataset, porque pueden producir reglas triviales.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{R: generar reglas con Apriori}
+\begin{lstlisting}[style=Rstyle]
+rules <- apriori(
+  Groceries,
+  parameter = list(
+    supp = 0.01,
+    conf = 0.30,
+    minlen = 2
+  )
+)
+
+rules
+summary(rules)
+inspect(head(rules, 10))
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{supp = 0.01}: la regla debe aparecer en al menos 1\% de las compras.
+  \item \texttt{conf = 0.30}: al menos 30\% de confianza.
+  \item \texttt{minlen = 2}: antecedente y consecuente no vacíos.
+\end{itemize}
+\end{frame}
+
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: ordenar por lift}
+%\begin{lstlisting}[style=Rstyle]
+%rules_lift <- sort(rules, by = "lift", decreasing = TRUE)
+%inspect(head(rules_lift, 10))
+%
+%# Extraer medidas de calidad
+%quality(head(rules_lift, 5))
+%\end{lstlisting}
+%
+%\begin{block}{Buena práctica}
+%No seleccionar reglas solo por confianza. Revisar también soporte, lift, tamaño de la regla y plausibilidad del patrón.
+%\end{block}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: filtrar reglas con un consecuente específico}
+%\begin{lstlisting}[style=Rstyle]
+%# Reglas que predicen compra de whole milk
+%rules_milk <- subset(
+%  rules,
+%  subset = rhs %in% "whole milk" & lift > 1.2
+%)
+%
+%rules_milk <- sort(rules_milk, by = "confidence")
+%inspect(head(rules_milk, 10))
+%\end{lstlisting}
+%
+%\begin{exampleblock}{Pregunta analítica}
+%¿Qué productos son buenos predictores de compra de leche? ¿La regla es útil comercialmente o solo refleja productos muy frecuentes?
+%\end{exampleblock}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: eliminar reglas redundantes}
+%\begin{lstlisting}[style=Rstyle]
+%# Reglas redundantes: una regla mas especifica
+%# no mejora la calidad de una regla mas general
+%redundant <- is.redundant(rules_lift)
+%sum(redundant)
+%
+%rules_pruned <- rules_lift[!redundant]
+%inspect(head(rules_pruned, 10))
+%\end{lstlisting}
+%
+%\begin{block}{Interpretación}
+%La poda facilita leer el resultado y evita reportar variantes casi idénticas de la misma asociación.
+%\end{block}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: visualización de reglas}
+%\begin{lstlisting}[style=Rstyle]
+%library(arulesViz)
+%
+%# Grafico soporte vs confianza, coloreado por lift
+%plot(rules_pruned, method = "scatterplot")
+%
+%# Red de reglas principales
+%plot(head(rules_pruned, 20), method = "graph")
+%
+%# Matriz agrupada
+%plot(head(rules_pruned, 50), method = "grouped")
+%\end{lstlisting}
+%
+%\begin{itemize}
+%  \item Los gráficos ayudan a detectar reglas fuertes, redundantes o aisladas.
+%  \item En informes, conviene mostrar pocas reglas bien seleccionadas.
+%\end{itemize}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: usar Eclat para itemsets frecuentes}
+%\begin{lstlisting}[style=Rstyle]
+%itemsets <- eclat(
+%  Groceries,
+%  parameter = list(supp = 0.02, maxlen = 4)
+%)
+%
+%itemsets <- sort(itemsets, by = "support")
+%inspect(head(itemsets, 10))
+%\end{lstlisting}
+%
+%\begin{block}{Diferencia práctica}
+%\texttt{eclat()} retorna itemsets frecuentes. Para obtener reglas, normalmente se generan reglas desde itemsets frecuentes o se usa directamente \texttt{apriori()}.
+%\end{block}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: crear transacciones desde una tabla}
+%\begin{lstlisting}[style=Rstyle]
+%compras <- tibble::tribble(
+%  ~id, ~producto,
+%  1, "pan", 1, "leche", 1, "huevos",
+%  2, "pan", 2, "mantequilla",
+%  3, "leche", 3, "huevos", 3, "cereal",
+%  4, "pan", 4, "leche", 4, "mantequilla",
+%  5, "pan", 5, "leche", 5, "huevos", 5, "mantequilla"
+%)
+%
+%trans <- as(split(compras$producto, compras$id), "transactions")
+%inspect(trans)
+%\end{lstlisting}
+%
+%\begin{block}{Idea}
+%Muchos datos reales están en formato largo: una fila por transacción e ítem. Hay que convertirlos a \texttt{transactions}.
+%\end{block}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: reglas en el ejemplo pequeño}
+%\begin{lstlisting}[style=Rstyle]
+%rules_small <- apriori(
+%  trans,
+%  parameter = list(supp = 0.4, conf = 0.6, minlen = 2)
+%)
+%
+%inspect(sort(rules_small, by = "lift"))
+%\end{lstlisting}
+%
+%\begin{alertblock}{Advertencia}
+%Con muestras pequeñas, las reglas pueden parecer fuertes por azar. Es importante reportar el tamaño muestral y validar en nuevos datos.
+%\end{alertblock}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{Datos no transaccionales: discretización}
+%\begin{itemize}
+%  \item Las reglas de asociación requieren variables discretas o binarias.
+%  \item Variables continuas deben discretizarse: bajo/medio/alto, cuartiles, umbrales clínicos, etc.
+%  \item La discretización afecta las reglas; debe justificarse.
+%\end{itemize}
+%
+%\begin{lstlisting}[style=Rstyle]
+%# Ejemplo con iris: convertir variables continuas a categorias
+%iris_disc <- discretizeDF(
+%  iris,
+%  methods = list(
+%    Sepal.Length = "frequency",
+%    Sepal.Width  = "frequency",
+%    Petal.Length = "frequency",
+%    Petal.Width  = "frequency"
+%  )
+%)
+%head(iris_disc)
+%\end{lstlisting}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{R: reglas desde iris discretizado}
+%\begin{lstlisting}[style=Rstyle]
+%trans_iris <- as(iris_disc, "transactions")
+%
+%rules_iris <- apriori(
+%  trans_iris,
+%  parameter = list(supp = 0.10, conf = 0.80, minlen = 2),
+%  appearance = list(rhs = c("Species=setosa",
+%                            "Species=versicolor",
+%                            "Species=virginica"),
+%                    default = "lhs")
+%)
+%
+%inspect(sort(rules_iris, by = "lift"))
+%\end{lstlisting}
+%
+%\begin{block}{Uso}
+%Esta estrategia permite encontrar combinaciones de rangos de variables asociadas a una clase.
+%\end{block}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}{Interpretación de una regla}
+%Supongamos una regla:
+%\[
+%\{Petal.Length = alto, Petal.Width = alto\} \Rightarrow \{Species = virginica\}
+%\]
+%
+%\begin{itemize}
+%  \item \textbf{Soporte}: ¿en cuántas muestras aparece este patrón completo?
+%  \item \textbf{Confianza}: ¿qué proporción de flores con pétalos altos son virginica?
+%  \item \textbf{Lift}: ¿cuánto más probable es virginica bajo el antecedente frente a su frecuencia basal?
+%  \item \textbf{Utilidad}: ¿la regla aporta una explicación simple o solo repite una relación obvia?
+%\end{itemize}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{Asociación y prueba estadística}
+%\begin{lstlisting}[style=Rstyle]
+%# Tomar una regla y construir tabla 2x2
+%r <- rules_pruned[1]
+%
+%# Matriz de incidencia de transacciones
+%X <- is.subset(lhs(r), Groceries)
+%Y <- is.subset(rhs(r), Groceries)
+%
+%tab <- table(antecedente = as.vector(X), consecuente = as.vector(Y))
+%tab
+%
+%fisher.test(tab)
+%chisq.test(tab)
+%\end{lstlisting}
+%
+%\begin{alertblock}{Cuidado}
+%Si se prueban miles de reglas, hay problema de comparaciones múltiples. No basta con un p-valor aislado.
+%\end{alertblock}
+%\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Selección responsable de reglas}
+\begin{enumerate}
+  \item Definir umbrales razonables de soporte y confianza.
+  \item Priorizar reglas con lift alto, pero no extremadamente raras.
+  \item Eliminar reglas redundantes o triviales.
+  \item Validar reglas en datos independientes, cuando sea posible.
+  \item Incorporar conocimiento del dominio antes de concluir causalidad o acción.
+\end{enumerate}
+
+\begin{block}{Recordar}
+Las reglas de asociación descubren patrones, no prueban causalidad.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Limitaciones frecuentes}
+\begin{itemize}
+  \item Explosión combinatoria cuando hay muchos ítems y soporte bajo.
+  \item Reglas triviales por ítems muy frecuentes.
+  \item Sensibilidad a la discretización de variables continuas.
+  \item Dificultad para interpretar miles de reglas simultáneamente.
+  \item No modela ajuste por confusores de forma directa.
+  \item Riesgo de sobreinterpretar correlaciones como causalidad.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Extensiones y variantes}
+\begin{itemize}
+  \item Reglas secuenciales: consideran orden temporal de eventos.
+  \item Reglas ponderadas: algunos ítems tienen mayor importancia o valor.
+  \item Reglas cuantitativas: incorporan variables numéricas discretizadas.
+  \item Reglas negativas: identifican ausencia conjunta o exclusión.
+  \item Reglas de clasificación: consecuente restringido a una clase objetivo.
+\end{itemize}
+
+\begin{exampleblock}{Ejemplo aplicado}
+En salud, se puede restringir el consecuente a ``respuesta a tratamiento'' y buscar combinaciones de biomarcadores asociadas a respuesta o no respuesta.
+\end{exampleblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Ejercicio 1: canasta de compras}
+\begin{enumerate}
+  \item Cargue el dataset \texttt{Groceries}.
+  \item Explore los 20 ítems más frecuentes.
+  \item Genere reglas con \texttt{supp = 0.005} y \texttt{conf = 0.25}.
+  \item Ordene por lift y seleccione 10 reglas interpretables.
+  \item Elimine reglas redundantes.
+  \item Discuta cuál regla sería útil para una estrategia comercial.
+\end{enumerate}
+\end{frame}
+
+%%------------------------------------------------
+%\begin{frame}{Ejercicio 2: reglas asociadas a clase}
+%\begin{enumerate}
+%  \item Use el dataset \texttt{iris}.
+%  \item Discretice las variables numéricas en tres categorías.
+%  \item Transforme el dataset a formato \texttt{transactions}.
+%  \item Genere reglas cuyo consecuente sea la especie.
+%  \item Compare reglas para \texttt{setosa}, \texttt{versicolor} y \texttt{virginica}.
+%  \item Interprete soporte, confianza y lift de las mejores reglas.
+%\end{enumerate}
+%\end{frame}
+
+%%------------------------------------------------
+%\begin{frame}{Ejercicio 3: interpretación crítica}
+%Para una regla con alto lift pero bajo soporte:
+%
+%\begin{enumerate}
+%  \item ¿Por qué podría ser interesante?
+%  \item ¿Por qué podría ser inestable?
+%  \item ¿Cómo la validaría en nuevos datos?
+%  \item ¿Qué criterio usaría para decidir si reportarla?
+%\end{enumerate}
+%
+%\begin{block}{Discusión}
+%En minería de datos, no siempre buscamos el patrón más fuerte, sino el patrón más útil, estable e interpretable.
+%\end{block}
+%\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Resumen}
+\begin{itemize}
+  \item El análisis de asociación busca relaciones frecuentes del tipo $X \Rightarrow Y$.
+  \item Soporte, confianza y lift responden preguntas distintas.
+  \item Apriori usa poda antimonótona; Eclat usa formato vertical; FP-Growth usa un árbol comprimido.
+  \item En R, \texttt{arules} permite generar, filtrar, ordenar y visualizar reglas.
+  \item La interpretación debe considerar redundancia, frecuencia basal, estabilidad y conocimiento del dominio.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Referencias}
+\begin{itemize}
+  \item Agrawal, R. y Srikant, R. (1994). Fast algorithms for mining association rules.
+  \item Han, J., Pei, J. y Yin, Y. (2000). Mining frequent patterns without candidate generation.
+  \item Hahsler, M., Grün, B. y Hornik, K. (2005). \texttt{arules}: Mining association rules and frequent itemsets.
+  \item Hahsler, M. (2017). \texttt{arulesViz}: Interactive visualization of association rules.
+\end{itemize}
+\end{frame}
+
+\end{document}
