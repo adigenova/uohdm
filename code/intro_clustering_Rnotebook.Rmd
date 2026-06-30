@@ -462,7 +462,7 @@ variance_tbl
 Elegimos automáticamente el número mínimo de componentes que explica al menos 90% de la varianza.
 
 ```{r select-pcs}
-n_pc_90 <- min(which(variance_tbl$cum_variance >= 0.90))
+n_pc_90 <- min(which(variance_tbl$cum_variance >= 0.70))
 
 n_pc_90
 
