@@ -158,3 +158,23 @@ La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blo
 
 El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/intro_clustering_Rnotebook.Rmd)
 
+
+### Clase 21: 18/06/2026
+
+Clustering II: Revision notebook clustering 2
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/clustering2.Rmd)
+
+### Control 2: 23/06/2026
+
+
+### Clase 22: 30/06/2026
+
+
+
+
+
+
+
