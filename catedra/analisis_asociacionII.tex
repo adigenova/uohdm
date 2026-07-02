@@ -1,0 +1,2007 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+%\usepackage[spanish,es-tabla]{babel}
+%\usepackage[utf8]{inputenc}
+%\usepackage[T1]{fontenc}
+%\usepackage{lmodern}
+%\usepackage{amsmath,amssymb}
+%\usepackage{graphicx}
+%\usepackage{booktabs}
+\usepackage{tabularx}
+%\usepackage{array}
+%\usepackage{xcolor}
+%\usepackage{listings}
+%\usepackage{tikz}
+%\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath, amssymb, booktabs, array, multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codegray}{RGB}{80,80,80}
+\definecolor{darkblue}{RGB}{20,55,100}
+\definecolor{darkgreen}{RGB}{0,90,60}
+
+\definecolor{uohblue}{HTML}{1F4E79}
+\definecolor{softgray}{HTML}{F2F4F7}
+\definecolor{darkgray}{HTML}{344054}
+\definecolor{codegreen}{HTML}{2E7D32}
+\definecolor{codeblue}{HTML}{0B5CAD}
+\definecolor{codered}{HTML}{B42318}
+
+\setbeamercolor{title}{fg=white,bg=uohblue}
+\setbeamercolor{frametitle}{fg=white,bg=uohblue}
+\setbeamercolor{block title}{fg=white,bg=uohblue}
+\setbeamercolor{block body}{bg=softgray,fg=black}
+\setbeamercolor{alerted text}{fg=codered}
+
+\lstdefinestyle{Rstyle}{
+  language=R,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{darkblue}\bfseries,
+  commentstyle=\color{codegray}\itshape,
+  stringstyle=\color{darkgreen},
+  backgroundcolor=\color{codebg},
+  frame=single,
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  upquote=true
+}
+\lstset{style=Rstyle}
+
+
+\lstdefinestyle{rcode}{
+  language=R,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{codeblue}\bfseries,
+  commentstyle=\color{codegreen},
+  stringstyle=\color{codered},
+  showstringspaces=false,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  rulecolor=\color{gray!30},
+  backgroundcolor=\color{gray!4}
+}
+\lstdefinestyle{out}{
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  frame=single,
+  rulecolor=\color{gray!30},
+  backgroundcolor=\color{gray!7}
+}
+
+
+\title[Asociación avanzada]{ Análisis de asociación II}
+\subtitle{Filtrado de reglas, visualización e interpretación con R}
+\author{Minería de Datos}
+\institute{Universidad de O'Higgins}
+\date{}
+
+\begin{document}
+
+%------------------------------------------------
+\begin{frame}
+  \titlepage
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Objetivos de la clase}
+\begin{enumerate}
+  \item Entender por qué Apriori puede generar miles de reglas y cómo reducirlas.
+  \item Filtrar reglas con métricas objetivas, plantillas y redundancia.
+  \item Visualizar reglas con \texttt{arulesViz}: scatterplot, matriz, grafo y explorador interactivo.
+  \item Interpretar reglas sin confundir la correlación, la causalidad y los artefactos de soporte bajo.
+  \item Introducir la discretización, las jerarquías de ítems y el análisis multinivel.
+  \item Ejemplos con dataset Zoo
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Flujo de análisis recomendado}
+\centering
+\begin{tikzpicture}[node distance=0.9cm, every node/.style={font=\small}]
+  \node[draw, rounded corners, fill=blue!8, minimum width=2.6cm, minimum height=0.7cm] (a) {1. Codificar datos};
+  \node[draw, rounded corners, fill=blue!8, right=of a, minimum width=2.5cm, minimum height=0.7cm] (b) {2. Minar reglas};
+  \node[draw, rounded corners, fill=blue!8, right=of b, minimum width=2.9cm, minimum height=0.7cm] (c) {3. Calcular métricas};
+  \node[draw, rounded corners, fill=orange!15, below=of b, minimum width=2.9cm, minimum height=0.7cm] (d) {4. Filtrar};
+  \node[draw, rounded corners, fill=orange!15, left=of d, minimum width=2.9cm, minimum height=0.7cm] (e) {5. Visualizar};
+  \node[draw, rounded corners, fill=green!15, right=of d, minimum width=2.9cm, minimum height=0.7cm] (f) {6. Interpretar};
+  \draw[-{Latex}] (a) -- (b);
+  \draw[-{Latex}] (b) -- (c);
+  \draw[-{Latex}] (c) -- (d);
+  \draw[-{Latex}] (d) -- (e);
+  \draw[-{Latex}] (d) -- (f);
+%  \draw[-{Latex}] (e) -- (f);
+\end{tikzpicture}
+
+\vspace{0.4cm}
+\textbf{Idea clave:} no se reportan ``todas'' las reglas; se construye un conjunto pequeño, robusto e interpretable.
+\end{frame}
+
+%------------------------------------------------
+\section{Motivación y métricas}
+
+\begin{frame}{El problema: explosión de reglas}
+\begin{block}{Qué ocurre en la práctica}
+Un umbral de soporte bajo y confianza alta puede generar miles de reglas, muchas redundantes o demasiado específicas.
+\end{block}
+
+\begin{exampleblock}{Ejemplo típico}
+\begin{itemize}
+  \item \texttt{Groceries}: 9835 transacciones y 169 categorías de producto.
+  \item Con soporte bajo aparecen patrones raros, algunos interesantes y otros espurios.
+  \item El objetivo es pasar de ``muchas reglas'' a ``pocas reglas accionables''.
+\end{itemize}
+\end{exampleblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Medidas básicas y avanzadas}
+Para una regla $X \Rightarrow Y$:
+\begin{align*}
+\text{soporte} &= P(X \cap Y) \\
+\text{cobertura} &= P(X) \\
+\text{confianza} &= P(Y \mid X)=\frac{P(X \cap Y)}{P(X)} \\
+\text{lift} &= \frac{P(X \cap Y)}{P(X)P(Y)}=\frac{\text{confianza}}{P(Y)} \\
+\text{leverage} &= P(X \cap Y)-P(X)P(Y) \\
+\text{conviction} &= \frac{1-P(Y)}{1-\text{confianza}}
+\end{align*}
+%\end{frame}
+
+%------------------------------------------------
+%\begin{frame}{Cómo leer las métricas}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\bfseries}lX}
+\toprule
+Métrica & Interpretación práctica \\
+\midrule
+Soporte & Prevalencia de la regla. Reglas con soporte muy bajo pueden ser inestables. \\
+Confianza & Proporción de transacciones con $X$ que también tienen $Y$. Puede ser engañosa si $Y$ es muy frecuente. \\
+Lift & Compara la co-ocurrencia observada contra independencia. Lift $>1$ sugiere asociación positiva. \\
+Leverage & Diferencia absoluta entre lo observado y lo esperado por independencia. Útil para priorizar impacto. \\
+Conviction & Penaliza contraejemplos de la regla. Crece cuando $X$ rara vez aparece sin $Y$. \\
+Count & Número absoluto de transacciones. Siempre revisar junto con soporte. \\
+\bottomrule
+\end{tabularx}
+\end{frame}
+
+%------------------------------------------------
+%\begin{frame}[fragile]{Preparación en R}
+%\begin{lstlisting}
+%# Paquetes principales
+%library(arules)
+%library(arulesViz)
+%library(tidyverse)
+%
+%# Dataset de mercado incluido en arules
+%data("Groceries")
+%summary(Groceries)
+%itemFrequencyPlot(Groceries, topN = 20, type = "relative")
+%\end{lstlisting}
+%
+%\begin{block}{Nota para R 4.4.x}
+%Si CRAN no instala \texttt{arules}, usar una versión archivada compatible:
+%\end{block}
+%\begin{lstlisting}
+%install.packages("remotes", repos = "https://cloud.r-project.org")
+%remotes::install_version("arules", version = "1.7-9",
+%                         repos = "https://cloud.r-project.org")
+%\end{lstlisting}
+%\end{frame}
+
+%------------------------------------------------
+\section{Filtrado de reglas}
+
+\begin{frame}[fragile]{1. Minar reglas con parámetros iniciales}
+\begin{lstlisting}[style=rcode]
+rules <- apriori(
+  Groceries,
+  parameter = list(
+    support = 0.005,
+    confidence = 0.3,
+    minlen = 2,
+    maxlen = 5
+  )
+)
+
+rules
+summary(rules)
+inspect(head(sort(rules, by = "lift"), 10))
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{support}: controla prevalencia mínima.
+  \item \texttt{confidence}: controla precisión condicional mínima.
+  \item \texttt{minlen/maxlen}: evita reglas demasiado simples o demasiado específicas.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{2. Agregar medidas de interés}
+\begin{lstlisting}[style=rcode]
+quality(rules) <- cbind(
+  quality(rules),
+  interestMeasure(
+    rules,
+    measure = c("leverage", "conviction", "phi", "chiSquared"),
+    transactions = Groceries
+  )
+)
+
+head(quality(rules))
+\end{lstlisting}
+
+\begin{block}{Uso práctico}
+Ordenar solo por lift puede sobrerrepresentar reglas raras. Combinar lift con soporte, count, leverage o significancia estadística.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{3. Filtrado por calidad}
+\begin{lstlisting}[style=rcode]
+rules_q <- subset(
+  rules,
+  subset = support >= 0.01 &
+           confidence >= 0.5 &
+           lift >= 1.5 &
+           count >= 50
+)
+
+rules_q <- sort(rules_q, by = "lift", decreasing = TRUE)
+inspect(head(rules_q, 10))
+\end{lstlisting}
+
+\begin{exampleblock}{Criterio defendible}
+``Reportamos reglas con soporte $\geq 1\%$, confianza $\geq 50\%$, lift $\geq 1.5$ y al menos 50 transacciones.''
+\end{exampleblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{4. Filtrado por plantillas: RHS específico}
+\begin{lstlisting}[style=rcode]
+rules_milk <- apriori(
+  Groceries,
+  parameter = list(support = 0.005, confidence = 0.3, minlen = 2),
+  appearance = list(
+    rhs = "whole milk",
+    default = "lhs"
+  )
+)
+
+rules_milk <- sort(rules_milk, by = "lift")
+inspect(head(rules_milk, 10))
+\end{lstlisting}
+
+\begin{block}{Interpretación}
+Útil cuando el objetivo es explicar un producto, clase o evento específico: ``qué antecedentes predicen leche entera''. 
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{5. Filtrado por ítems obligatorios o no deseados}
+\begin{lstlisting}[style=rcode]
+# Reglas que contienen yogurt en algún lado
+rules_yogurt <- subset(rules, items %in% "yogurt")
+
+# Reglas con yogurt en el antecedente y lift alto
+rules_yogurt_lhs <- subset(
+  rules,
+  subset = lhs %in% "yogurt" & lift > 1.5
+)
+
+# Reglas que NO contienen soda
+rules_no_soda <- subset(rules, !(items %in% "soda"))
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{items \%in\%}: busca en antecedente o consecuente.
+  \item \texttt{lhs \%in\%}: restringe el antecedente.
+  \item \texttt{rhs \%in\%}: restringe el consecuente.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{6. Eliminar reglas redundantes}
+\begin{lstlisting}[style=rcode]
+length(rules_q)
+
+redundantes <- is.redundant(rules_q)
+table(redundantes)
+
+rules_nr <- rules_q[!redundantes]
+rules_nr <- sort(rules_nr, by = "lift")
+
+length(rules_nr)
+inspect(head(rules_nr, 10))
+\end{lstlisting}
+
+\begin{block}{Definición práctica}
+Una regla es redundante si existe una regla más general con igual o mayor confianza.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Ejemplo conceptual de redundancia}
+\begin{columns}
+\column{0.55\textwidth}
+\small
+\begin{align*}
+\{pan\} &\Rightarrow \{leche\},\quad conf=0.75 \\
+\{pan, mantequilla\} &\Rightarrow \{leche\},\quad conf=0.75
+\end{align*}
+
+La segunda regla agrega una condición, pero no mejora la confianza.
+
+\column{0.45\textwidth}
+\begin{exampleblock}{Conclusión}
+Preferir la regla más simple:
+\[
+\{pan\}\Rightarrow\{leche\}
+\]
+si su desempeño es igual o mejor.
+\end{exampleblock}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{7. Reglas compactas: itemsets cerrados y maximales}
+\begin{lstlisting}[style=rcode]
+itemsets <- apriori(
+  Groceries,
+  parameter = list(support = 0.01, target = "frequent itemsets")
+)
+
+closed_itemsets <- itemsets[is.closed(itemsets)]
+max_itemsets    <- itemsets[is.maximal(itemsets)]
+#vector con comparación de items
+c(
+  frequent = length(itemsets),
+  closed   = length(closed_itemsets),
+  maximal  = length(max_itemsets)
+)
+\end{lstlisting}
+
+\begin{itemize}
+  \item \textbf{Cerrados}: conservan información de soporte con menos itemsets.
+  \item \textbf{Maximales}: resumen aún más, pero pierden soportes de subconjuntos.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{8. Prueba estadística para una regla}
+\begin{lstlisting}[style=rcode]
+# Ejemplo: yogurt => whole milk
+M <- as(Groceries, "matrix")
+X <- M[, "yogurt"]
+Y <- M[, "whole milk"]
+
+tab <- table(X, Y)
+tab
+
+fisher.test(tab)
+chisq.test(tab)
+\end{lstlisting}
+
+\begin{block}{Uso práctico}
+La prueba ayuda a evaluar si la co-ocurrencia difiere de independencia, pero no reemplaza la interpretación ni corrige automáticamente por múltiples pruebas.
+\end{block}
+\end{frame}
+
+
+%------------------------------------------------
+\begin{frame}[fragile]{Explicación}
+\Large
+Queremos entender qué hace este código:
+
+\vspace{0.4cm}
+\begin{lstlisting}[style=Rstyle]
+# Ejemplo: yogurt => whole milk
+M <- as(Groceries, "matrix")
+X <- M[, "yogurt"]
+Y <- M[, "whole milk"]
+tab <- table(X, Y)
+tab
+fisher.test(tab)
+chisq.test(tab)
+\end{lstlisting}
+
+\vspace{0.3cm}
+\normalsize
+La pregunta estadística es:
+
+\begin{center}
+\textbf{¿La compra de yogurt está asociada con la compra de leche entera?}
+\end{center}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Regla de asociación evaluada}
+\Large
+La regla es:
+
+\[
+\texttt{yogurt} \Rightarrow \texttt{whole milk}
+\]
+
+\vspace{0.3cm}
+\normalsize
+Interpretación :
+
+\begin{quote}
+Si una transacción contiene \texttt{yogurt}, entonces es más probable que también contenga \texttt{whole milk}.
+\end{quote}
+
+\vspace{0.3cm}
+Pero esta afirmación debe evaluarse con dos criterios:
+
+\begin{enumerate}
+  \item \textbf{Magnitud de la asociación}: soporte, confianza, lift.
+  \item \textbf{Evidencia estadística}: test de independencia.
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Paso 1: convertir transacciones a matriz binaria}
+\begin{lstlisting}[style=Rstyle]
+M <- as(Groceries, "matrix")
+\end{lstlisting}
+
+\vspace{0.3cm}
+\texttt{Groceries} es un conjunto de transacciones. Cada fila es una compra y cada columna es un producto.
+
+\vspace{0.3cm}
+Después de convertirlo a matriz:
+
+\[
+M_{ij} =
+\begin{cases}
+\texttt{TRUE}, & \text{si la transacción } i \text{ contiene el producto } j \\
+\texttt{FALSE}, & \text{si no lo contiene}
+\end{cases}
+\]
+
+\vspace{0.3cm}
+Ejemplo conceptual:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Transacción & yogurt & whole milk & bread \\
+\midrule
+T1 & TRUE  & TRUE  & FALSE \\
+T2 & FALSE & TRUE  & TRUE \\
+T3 & TRUE  & FALSE & TRUE \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Paso 2: definir antecedente y consecuente}
+\begin{lstlisting}[style=Rstyle]
+X <- M[, "yogurt"]
+Y <- M[, "whole milk"]
+\end{lstlisting}
+
+\vspace{0.4cm}
+\Large
+\[
+X = \texttt{yogurt}
+\]
+
+\[
+Y = \texttt{whole milk}
+\]
+
+\vspace{0.3cm}
+\normalsize
+Cada variable es un vector lógico:
+
+\begin{itemize}
+  \item \texttt{X = TRUE}: la transacción contiene yogurt.
+  \item \texttt{Y = TRUE}: la transacción contiene leche entera.
+\end{itemize}
+
+\vspace{0.3cm}
+Por lo tanto, el código transforma una regla en un problema clásico de asociación entre dos variables binarias.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Paso 3: construir la tabla de contingencia}
+\begin{lstlisting}[style=Rstyle]
+tab <- table(X, Y)
+tab
+\end{lstlisting}
+
+\vspace{0.2cm}
+Salida  para \texttt{Groceries}:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+ & \texttt{Y = FALSE} & \texttt{Y = TRUE} \\
+\midrule
+\texttt{X = FALSE} & 6501 & 1962 \\
+\texttt{X = TRUE}  & 821  & 551 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.2cm}
+Donde:
+
+\begin{itemize}
+  \item 551 compras contienen \texttt{yogurt} y \texttt{whole milk}.
+  \item 821 contienen \texttt{yogurt}, pero no \texttt{whole milk}.
+  \item 1962 contienen \texttt{whole milk}, pero no \texttt{yogurt}.
+  \item 6501 no contienen ninguno de los dos productos.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Tabla observada: notación estadística}
+\Large
+\[
+\begin{array}{c|cc|c}
+ & Y=0 & Y=1 & \text{Total} \\
+\hline
+X=0 & d=6501 & c=1962 & 8463 \\
+X=1 & b=821  & a=551  & 1372 \\
+\hline
+\text{Total} & 7322 & 2513 & 9835
+\end{array}
+\]
+
+\vspace{0.3cm}
+\normalsize
+Para la regla:
+
+\[
+X \Rightarrow Y
+\]
+
+el conteo más importante es:
+
+\[
+a = \#(X=1, Y=1) = 551
+\]
+
+porque corresponde a las transacciones que contienen ambos productos.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Métricas de la regla}
+Con los conteos anteriores:
+
+\[
+N = 9835, \quad a=551, \quad b=821, \quad c=1962, \quad d=6501
+\]
+
+\vspace{0.2cm}
+\begin{align*}
+\text{soporte}(X \Rightarrow Y) &= P(X,Y) = \frac{551}{9835} = 0.056 \\
+\text{confianza}(X \Rightarrow Y) &= P(Y\mid X) = \frac{551}{551+821} = 0.402 \\
+\text{soporte}(Y) &= P(Y) = \frac{2513}{9835} = 0.256 \\
+\text{lift}(X \Rightarrow Y) &= \frac{P(Y\mid X)}{P(Y)} = \frac{0.402}{0.256} = 1.57
+\end{align*}
+
+\vspace{0.2cm}
+\textbf{Interpretación:} entre quienes compran yogurt, la probabilidad de comprar leche entera es 1.57 veces la probabilidad basal de comprar leche entera.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{¿Por qué hacer un test estadístico?}
+\Large
+Las métricas describen la asociación, pero no responden completamente:
+
+\vspace{0.4cm}
+\begin{center}
+\textbf{¿La co-ocurrencia observada podría explicarse por azar?}
+\end{center}
+
+\vspace{0.4cm}
+\normalsize
+Para eso se testea independencia:
+
+\[
+H_0: X \text{ e } Y \text{ son independientes}
+\]
+
+\[
+H_1: X \text{ e } Y \text{ no son independientes}
+\]
+
+\vspace{0.3cm}
+En términos de la regla:
+
+\[
+H_0: P(Y\mid X) = P(Y)
+\]
+
+\[
+H_1: P(Y\mid X) \neq P(Y)
+\]
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Conteos esperados bajo independencia}
+Si \texttt{yogurt} y \texttt{whole milk} fueran independientes, el conteo esperado en cada celda sería:
+
+\[
+E_{ij} = \frac{(\text{total fila } i)(\text{total columna } j)}{N}
+\]
+
+\vspace{0.2cm}
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+ & \texttt{Y = FALSE} & \texttt{Y = TRUE} \\
+\midrule
+\texttt{X = FALSE} & 6300.57 & 2162.43 \\
+\texttt{X = TRUE}  & 1021.43 & 350.57 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{0.3cm}
+Celda clave:
+
+\[
+E(X=1,Y=1)=350.57
+\]
+
+Pero observamos:
+
+\[
+O(X=1,Y=1)=551
+\]
+
+Hay muchas más compras conjuntas de \texttt{yogurt} y \texttt{whole milk} de las esperadas bajo independencia.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Test chi-cuadrado de independencia}
+\begin{lstlisting}[style=Rstyle]
+chisq.test(tab)
+\end{lstlisting}
+
+\vspace{0.3cm}
+El test compara conteos observados contra conteos esperados:
+
+\[
+\chi^2 = \sum \frac{(O_{ij} - E_{ij})^2}{E_{ij}}
+\]
+
+
+\begin{lstlisting}[style=Rstyle]
+Pearson's Chi-squared test with Yates' continuity correction
+
+X-squared = 177.99, df = 1, p-value < 2.2e-16
+\end{lstlisting}
+
+\vspace{0.2cm}
+\textbf{Interpretación:} el valor-p es extremadamente pequeño, por lo tanto se rechaza la independencia entre \texttt{yogurt} y \texttt{whole milk}.
+
+
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Test exacto de Fisher}
+\begin{lstlisting}[style=Rstyle]
+fisher.test(tab)
+\end{lstlisting}
+
+\vspace{0.3cm}
+El test exacto de Fisher también evalúa independencia en una tabla $2\times2$.
+
+\vspace{0.2cm}
+Es especialmente útil cuando hay conteos pequeños. En este ejemplo los conteos son grandes, pero Fisher sigue siendo válido.
+
+
+\begin{lstlisting}[style=Rstyle]
+Fisher's Exact Test for Count Data
+
+p-value < 2.2e-16
+alternative hypothesis: true odds ratio is not equal to 1
+sample estimates:
+odds ratio = 2.22
+\end{lstlisting}
+
+\vspace{0.2cm}
+\textbf{Interpretación:} las odds de comprar \texttt{whole milk} son mayores entre quienes compran \texttt{yogurt}.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Odds ratio y asociación positiva}
+El odds ratio de la tabla es:
+
+\[
+OR = \frac{a \cdot d}{b \cdot c}
+\]
+
+\[
+OR = \frac{551 \times 6501}{821 \times 1962} = 2.22
+\]
+
+\vspace{0.4cm}
+Interpretación:
+
+\begin{itemize}
+  \item $OR = 1$: no hay asociación.
+  \item $OR > 1$: asociación positiva.
+  \item $OR < 1$: asociación negativa.
+\end{itemize}
+
+\vspace{0.3cm}
+En este caso:
+
+\[
+OR = 2.22 > 1
+\]
+
+lo que apoya una asociación positiva entre \texttt{yogurt} y \texttt{whole milk}.
+
+\begin{quote}
+La regla \texttt{yogurt} $\Rightarrow$ \texttt{whole milk} muestra una asociación positiva y estadísticamente significativa en el dataset \texttt{Groceries}.
+\end{quote}
+
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Test direccional: asociación positiva}
+Por defecto, Fisher testea si existe asociación en cualquier dirección:
+
+\[
+H_1: OR \neq 1
+\]
+
+\vspace{0.3cm}
+Pero si queremos testear específicamente una regla positiva:
+
+\[
+\texttt{yogurt} \Rightarrow \texttt{whole milk}
+\]
+
+podemos usar:
+
+\begin{lstlisting}[style=Rstyle]
+fisher.test(tab, alternative = "greater")
+\end{lstlisting}
+
+\vspace{0.2cm}
+Esto evalúa:
+
+\[
+H_1: OR > 1
+\]
+
+\vspace{0.2cm}
+Es decir, si \texttt{yogurt} y \texttt{whole milk} aparecen juntos más de lo esperado bajo independencia.
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Cuidado con la interpretación}
+\Large
+El test demuestra asociación, no causalidad.
+
+\vspace{0.4cm}
+\normalsize
+No podemos concluir:
+
+\begin{quote}
+Comprar yogurt causa comprar leche entera.
+\end{quote}
+
+\vspace{0.3cm}
+Sí podemos concluir:
+
+\begin{quote}
+En estas transacciones, yogurt y leche entera aparecen juntos más de lo esperado bajo independencia.
+\end{quote}
+
+\vspace{0.4cm}
+Además, en minería de reglas se prueban muchas asociaciones; por lo tanto, en análisis formales conviene considerar ajuste por múltiples pruebas o usar el test como herramienta interpretativa secundaria.
+\end{frame}
+
+
+
+
+
+
+
+%------------------------------------------------
+\begin{frame}[fragile]{9. Barrido de parámetros}
+\begin{lstlisting}[style=rcode]
+grid <- expand.grid(
+  support = c(0.001, 0.005, 0.01, 0.02),
+  confidence = c(0.3, 0.5, 0.7)
+)
+
+grid$n_rules <- purrr::map2_int(
+  grid$support, grid$confidence,
+  ~ length(apriori(
+      Groceries,
+      parameter = list(support = .x, confidence = .y, minlen = 2),
+      control = list(verbose = FALSE)
+    ))
+)
+
+grid
+\end{lstlisting}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Visualizar sensibilidad de parámetros}
+\begin{lstlisting}[style=rcode]
+ggplot(grid, aes(x = support, y = n_rules, color = factor(confidence))) +
+  geom_line() +
+  geom_point() +
+  scale_x_log10() +
+  labs(
+    x = "Soporte minimo",
+    y = "Numero de reglas",
+    color = "Confianza"
+  ) +
+  theme_minimal()
+\end{lstlisting}
+
+\begin{block}{Lectura}
+Una caída abrupta indica que el umbral de soporte está controlando fuertemente el espacio de búsqueda.
+\end{block}
+\end{frame}
+
+
+%------------------------------------------------
+\section{Visualizacion}
+\begin{frame}[fragile]{Visualizacion 1: frecuencia de items}
+\begin{columns}[T]
+\column{0.47\textwidth}
+\begin{lstlisting}[style=rcode]
+itemFrequencyPlot(trans, topN = 20)
+\end{lstlisting}
+
+\begin{block}{Que mirar}
+\begin{itemize}
+  \item Items muy frecuentes: potenciales reglas triviales.
+  \item Items raros: requieren soporte bajo.
+  \item Variables de clase: \texttt{type=...}.
+\end{itemize}
+\end{block}
+
+\column{0.49\textwidth}
+\begin{tikzpicture}
+\begin{axis}[
+  xbar,
+  width=0.98\textwidth,
+  height=0.58\textheight,
+  xmin=0, xmax=90,
+  xlabel={count},
+  symbolic y coords={toothed,tail,legs,breathes,backbone},
+  ytick=data,
+  nodes near coords,
+  nodes near coords align={horizontal},
+]
+\addplot coordinates {(61,toothed) (75,tail) (78,legs) (80,breathes) (83,backbone)};
+\end{axis}
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Visualizacion 2: scatterplot de reglas}
+\begin{columns}[T]
+\column{0.46\textwidth}
+\begin{lstlisting}[style=rcode]
+plot(rules)
+plot(rules, shading = "order")
+plot(rules, control = list(jitter = 0))
+\end{lstlisting}
+
+\begin{block}{Como leerlo}
+\begin{itemize}
+  \item X: soporte.
+  \item Y: confianza.
+  \item Color: lift u orden de la regla.
+  \item Nubes densas indican reglas repetitivas.
+\end{itemize}
+\end{block}
+
+\column{0.50\textwidth}
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.98\textwidth,
+  height=0.58\textheight,
+  xlabel={support}, ylabel={confidence},
+  xmin=0.04, xmax=0.45, ymin=0.75, ymax=1.02,
+  grid=both,
+]
+\addplot[only marks, mark=*, mark size=1.8pt] coordinates {
+(0.079,1.00) (0.129,1.00) (0.198,1.00) (0.406,1.00)
+(0.386,0.907) (0.158,0.889) (0.129,0.813) (0.297,1.00)
+(0.327,1.00) (0.376,1.00) (0.168,0.850) (0.139,0.824)
+};
+\end{axis}
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Visualizacion 3: matriz agrupada}
+\begin{columns}[T]
+\column{0.47\textwidth}
+\begin{lstlisting}[style=rcode]
+set.seed(1234)
+plot(rules,
+     method = "grouped matrix")
+\end{lstlisting}
+
+\begin{block}{Como leerla}
+Agrupa reglas con relaciones LHS-RHS similares. Es util cuando hay muchas reglas, porque revela bloques: peces, aves, mamiferos.
+\end{block}
+
+\column{0.49\textwidth}
+\scriptsize
+\begin{tabular}{lccc}
+\toprule
+Grupo de reglas & RHS dominante & Rasgos frecuentes & Interpretacion \\
+\midrule
+G1 & type=fish & eggs, fins, aquatic & Perfil acuatico \\
+G2 & type=bird & feathers, airborne, tail & Perfil ave \\
+G3 & type=mammal & milk, hair, toothed & Perfil mamifero \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.35cm}
+\begin{center}
+\begin{tikzpicture}[scale=0.85]
+\foreach \x/\y/\s/\c in {0/0/1.0/blue,1/0/0.75/blue,2/0/0.5/blue,0/1/0.25/gray,1/1/0.9/orange,2/1/0.6/orange,0/2/0.3/gray,1/2/0.5/gray,2/2/0.95/green} {
+  \fill[\c!55] (\x,\y) circle (0.25*\s+0.05);
+}
+\node at (0,-0.55) {fish}; \node at (1,-0.55) {bird}; \node at (2,-0.55) {mammal};
+\node[rotate=90] at (-0.55,0) {fins}; \node[rotate=90] at (-0.55,1) {airborne}; \node[rotate=90] at (-0.55,2) {milk};
+\end{tikzpicture}
+\end{center}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Visualizacion 4: grafo de reglas}
+\begin{columns}[T]
+\column{0.46\textwidth}
+\begin{lstlisting}[style=rcode]
+plot(rules, method = "graph")
+
+plot(head(rules, by = "phi", n = 100),
+     method = "graph")
+\end{lstlisting}
+
+\begin{block}{Cuando usarlo}
+Usar pocos nodos: top 50 o top 100 por lift, phi o confianza. Si se grafican miles de reglas, el grafo deja de ser interpretable.
+\end{block}
+
+\column{0.50\textwidth}
+\begin{center}
+\begin{tikzpicture}[node distance=1.0cm, every node/.style={font=\scriptsize}]
+\node[draw, circle, fill=green!15] (milk) {milk};
+\node[draw, circle, fill=green!15, below left=0.75cm of milk] (hair) {hair};
+\node[draw, rounded corners, fill=green!30, right=1.2cm of milk] (mammal) {type=mammal};
+\node[draw, circle, fill=orange!15, above=0.75cm of mammal] (feath) {feathers};
+\node[draw, rounded corners, fill=orange!30, right=1.3cm of feath] (bird) {type=bird};
+\node[draw, circle, fill=blue!15, below=0.75cm of mammal] (fins) {fins};
+\node[draw, circle, fill=blue!15, below=0.75cm of fins] (eggs) {eggs};
+\node[draw, rounded corners, fill=blue!30, right=1.3cm of fins] (fish) {type=fish};
+\draw[->, thick] (milk) -- node[above]{1.0} (mammal);
+\draw[->, thick] (hair) -- (mammal);
+\draw[->, thick] (feath) -- node[above]{1.0} (bird);
+\draw[->, thick] (fins) -- (fish);
+\draw[->, thick] (eggs) -- (fish);
+\end{tikzpicture}
+\end{center}
+\end{columns}
+\end{frame}
+
+%%------------------------------------------------
+
+\section{Interpretación}
+
+\begin{frame}{Errores frecuentes de interpretación}
+\begin{enumerate}
+  \item \textbf{Confundir confianza con causalidad}: $X \Rightarrow Y$ no significa que $X$ cause $Y$.
+  \item \textbf{Ignorar la frecuencia base de $Y$}: si $Y$ es muy común, la confianza puede ser alta sin asociación real.
+  \item \textbf{Sobrevalorar lift con soporte bajo}: una regla rara puede tener lift extremo por azar.
+  \item \textbf{No revisar conteos absolutos}: soporte relativo sin count puede ocultar inestabilidad.
+  \item \textbf{Reportar reglas redundantes}: reglas más largas no siempre son mejores.
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Recomendaciones para interpretar una regla}
+\begin{exampleblock}{Regla}
+\[
+\{yogurt, other\ vegetables\} \Rightarrow \{whole\ milk\}
+\]
+\end{exampleblock}
+
+\begin{enumerate}
+  \item \textbf{Cobertura}: qué proporción compra yogurt y verduras.
+  \item \textbf{Confianza}: entre quienes compran eso, cuántos también compran leche.
+  \item \textbf{Lift}: cuánto aumenta la probabilidad respecto a comprar leche al azar.
+  \item \textbf{Count}: cuántas transacciones reales apoyan la regla.
+  \item \textbf{Acción}: promoción cruzada, layout, recomendador o hipótesis de comportamiento.
+\end{enumerate}
+\end{frame}
+
+%%------------------------------------------------
+%\begin{frame}{Decisión: ¿reportar o descartar?}
+%\scriptsize
+%\begin{tabularx}{\textwidth}{lXXX}
+%\toprule
+%Caso & Patrón & Riesgo & Decisión sugerida \\
+%\midrule
+%Alta confianza, lift $\approx 1$ & $Y$ es muy frecuente & Regla trivial & Descartar o usar como baseline \\
+%Lift alto, count bajo & Asociación rara & Azar / inestabilidad & Requiere validación \\
+%Soporte alto, lift moderado & Patrón común & Puede ser accionable & Reportar si interpreta negocio \\
+%Regla larga & Muy específica & Redundancia / sobreajuste & Comparar con reglas más generales \\
+%RHS objetivo & Regla explicativa & Sesgo de selección & Declarar plantilla usada \\
+%\bottomrule
+%\end{tabularx}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{Exportar reglas para informe}
+%\begin{lstlisting}
+%rules_tbl <- as(rules_nr, "data.frame") %>%
+%  arrange(desc(lift)) %>%
+%  select(rules, support, confidence, coverage, lift, count, leverage)
+%
+%head(rules_tbl, 20)
+%
+%write.csv(rules_tbl, "reglas_filtradas.csv", row.names = FALSE)
+%\end{lstlisting}
+%
+%\begin{block}{Para reportes}
+%Incluir reglas, métricas, criterio de filtrado y una breve interpretación por grupo de reglas.
+%\end{block}
+%\end{frame}
+
+%------------------------------------------------
+\section{Datos no transaccionales y jerarquías}
+
+\begin{frame}{Variables categóricas, lógicas y continuas}
+\begin{itemize}
+  \item Variables categóricas: cada nivel se transforma en un ítem, por ejemplo \texttt{Species=setosa}.
+  \item Variables lógicas: normalmente solo \texttt{TRUE} genera un ítem.
+  \item Variables continuas: deben discretizarse antes de transformarse en ítems.
+\end{itemize}
+
+\begin{block}{Riesgo metodológico}
+La discretización cambia las reglas encontradas. Debe justificarse y, si es posible, evaluarse con sensibilidad.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Ejemplo: discretización con iris}
+\begin{lstlisting}[style=rcode]
+data(iris)
+iris$Versicolor <- iris$Species == "versicolor"
+
+iris_disc <- iris %>%
+  mutate(
+    Petal.Length = discretize(Petal.Length,
+                              method = "frequency",
+                              breaks = 3,
+                              labels = c("short", "medium", "long")),
+    Petal.Width = discretize(Petal.Width,
+                             method = "frequency",
+                             breaks = 2,
+                             labels = c("narrow", "wide"))
+  )
+
+iris_trans <- transactions(iris_disc)
+itemLabels(iris_trans)
+\end{lstlisting}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Reglas de asociación orientadas a clase}
+\begin{lstlisting}[style=rcode]
+iris_rules <- apriori(
+  iris_trans,
+  parameter = list(support = 0.05, confidence = 0.8, minlen = 2),
+  appearance = list(
+    rhs = c("Species=setosa", "Species=versicolor", "Species=virginica"),
+    default = "lhs"
+  )
+)
+
+iris_rules <- iris_rules[!is.redundant(iris_rules)]
+inspect(sort(iris_rules, by = "lift"))
+\end{lstlisting}
+
+\begin{block}{Uso}
+Puede verse como un clasificador interpretable basado en reglas.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Jerarquías de ítems}
+\begin{exampleblock}{Ejemplo supermercado}
+\begin{itemize}
+  \item \texttt{whole milk}, \texttt{yogurt}, \texttt{cream} $\rightarrow$ \texttt{dairy produce}
+  \item \texttt{citrus fruit}, \texttt{tropical fruit} $\rightarrow$ \texttt{fruit}
+\end{itemize}
+\end{exampleblock}
+
+\begin{block}{Ventaja}
+Permite descubrir reglas a nivel de producto, categoría o ambos niveles simultáneamente.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Agregación de ítems en Groceries}
+\begin{lstlisting}[style=rcode]
+data("Groceries")
+head(itemInfo(Groceries))
+
+Groceries_level2 <- aggregate(Groceries, by = "level2")
+Groceries_level2
+
+inspect(head(Groceries, 3))
+inspect(head(Groceries_level2, 3))
+
+rules_level2 <- apriori(
+  Groceries_level2,
+  parameter = list(support = 0.005, confidence = 0.8)
+)
+inspect(head(sort(rules_level2, by = "lift"), 10))
+\end{lstlisting}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Análisis multinivel}
+\begin{lstlisting}[style=rcode]
+Groceries_multi <- addAggregate(Groceries, "level2")
+inspect(head(Groceries_multi, 3))
+
+rules_multi <- apriori(
+  Groceries_multi,
+  parameter = list(support = 0.005, confidence = 0.8)
+)
+
+# Elimina reglas espurias: item A => grupo de item A
+rules_multi <- filterAggregate(rules_multi)
+inspect(head(sort(rules_multi, by = "lift"), 10))
+\end{lstlisting}
+
+\begin{block}{Interpretación}
+Ayuda a estudiar si la asociación ocurre entre productos concretos o entre categorías generales.
+\end{block}
+\end{frame}
+
+
+
+%------------------------------------------------
+\begin{frame}[fragile]{Dataset Zoo: animales como transacciones}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{lstlisting}[style=rcode]
+library(arules)
+library(arulesViz)
+library(mlbench)
+library(tidyverse)
+
+data(Zoo, package = "mlbench")
+
+Zoo_has_legs <- Zoo |>
+  mutate(legs = legs > 0)
+
+trans <- transactions(Zoo_has_legs)
+trans
+\end{lstlisting}
+
+\column{0.44\textwidth}
+\begin{lstlisting}[style=out]
+transactions in sparse format with
+ 101 transactions (rows)
+ 23 items (columns)
+\end{lstlisting}
+
+\begin{block}{Interpretacion}
+Cada animal es una transaccion. Cada rasgo es un item: \texttt{hair}, \texttt{milk}, \texttt{fins}, \texttt{type=mammal}, etc.
+\end{block}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Antes de minar reglas: inspeccionar las transacciones}
+\begin{columns}[T]
+\column{0.54\textwidth}
+\begin{lstlisting}[style=rcode]
+summary(trans)
+itemFrequencyPlot(trans, topN = 20)
+inspect(trans[1:3])
+\end{lstlisting}
+
+\column{0.42\textwidth}
+\begin{lstlisting}[style=out]
+most frequent items:
+backbone breathes legs tail toothed
+      83      80   78   75      61
+
+itemset length:
+Min. 3 | Median 9 | Mean 8.31
+Max. 12
+\end{lstlisting}
+\end{columns}
+
+\begin{alertblock}{Recordar}
+Si los items frecuentes son muy generales, muchas reglas tendran alta confianza pero baja utilidad interpretativa.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{El problema: demasiadas reglas}
+\begin{columns}[T]
+\column{0.50\textwidth}
+\begin{lstlisting}[style=rcode]
+rules <- apriori(
+  trans,
+  parameter = list(
+    support = 0.05,
+    confidence = 0.9
+  )
+)
+length(rules)
+\end{lstlisting}
+
+\column{0.46\textwidth}
+\begin{lstlisting}[style=out]
+Absolute minimum support count: 5
+set transactions ...
+  [23 item(s), 101 transaction(s)]
+checking subsets of size 1 2 ... 10
+writing ... [7174 rule(s)]
+
+[1] 7174
+\end{lstlisting}
+\end{columns}
+
+\vspace{0.2cm}
+\begin{block}{Pregunta }
+\centering
+¿Cómo pasamos de 7174 reglas a un conjunto que se pueda explicar en clase o en un informe?
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Mapa general de mecanismos de filtrado}
+\begin{center}
+\begin{tikzpicture}[node distance=1.2cm, every node/.style={font=\small}]
+\node[draw, rounded corners, fill=blue!8, minimum width=3.2cm, minimum height=0.75cm] (raw) {Reglas crudas};
+\node[draw, rounded corners, fill=green!10, right=0.8cm of raw, minimum width=3.6cm, minimum height=0.75cm] (metrics) {Metricas: soporte, confianza, lift};
+\node[draw, rounded corners, fill=orange!12, right=0.8cm of metrics, minimum width=3.4cm, minimum height=0.75cm] (templates) {Plantillas: RHS/LHS};
+\node[draw, rounded corners, fill=purple!10, below=0.8cm of metrics, minimum width=3.5cm, minimum height=0.75cm] (redund) {No redundantes};
+\node[draw, rounded corners, fill=red!8, right=0.8cm of redund, minimum width=3.2cm, minimum height=0.75cm] (viz) {Visualizacion};
+\node[draw, rounded corners, fill=gray!15, below=0.8cm of redund, minimum width=4.0cm, minimum height=0.75cm] (final) {Reglas interpretables};
+\draw[->, thick] (raw) -- (metrics);
+\draw[->, thick] (metrics) -- (templates);
+\draw[->, thick] (templates) |- (redund);
+\draw[->, thick] (redund) -- (viz);
+\draw[->, thick] (viz) |- (final);
+\end{tikzpicture}
+\end{center}
+
+\begin{block}{Idea central}
+El filtrado debe combinar criterios estadísticos, criterios computacionales y criterios de interpretación del problema.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\section{Filtrado por parámetros}
+\begin{frame}[fragile]{Filtro 1: soporte minimo}
+\begin{block}{Definicion}
+\[
+\mathrm{supp}(X \Rightarrow Y) = \frac{\#\{t: X \cup Y \subseteq t\}}{N}
+\]
+\end{block}
+
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{lstlisting}[style=rcode]
+# soporte para al menos 5 animales
+5 / nrow(trans)
+
+its_10 <- apriori(trans,
+  parameter = list(target = "frequent",
+                   support = 0.10))
+
+its_05 <- apriori(trans,
+  parameter = list(target = "frequent",
+                   support = 0.05))
+\end{lstlisting}
+
+\column{0.44\textwidth}
+\begin{lstlisting}[style=out]
+[1] 0.0495
+
+support = 0.10 -> 1465 itemsets
+support = 0.05 -> 2537 itemsets
+\end{lstlisting}
+\end{columns}
+
+\begin{alertblock}{Interpretacion}
+Bajar soporte de 10\% a 5\% permite detectar patrones que aparecen en al menos 5 animales, pero aumenta mucho el espacio de búsqueda.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Resultado del soporte: itemsets frecuentes principales}
+\begin{columns}[T]
+\column{0.50\textwidth}
+\begin{lstlisting}[style=rcode]
+its <- sort(its_05, by = "support")
+inspect(head(its, n = 10))
+\end{lstlisting}
+
+\column{0.46\textwidth}
+\scriptsize
+\begin{tabular}{lrr}
+\toprule
+Itemset & support & count \\
+\midrule
+\{backbone\} & 0.8218 & 83 \\
+\{breathes\} & 0.7921 & 80 \\
+\{legs\} & 0.7723 & 78 \\
+\{tail\} & 0.7426 & 75 \\
+\{backbone, tail\} & 0.7327 & 74 \\
+\{breathes, legs\} & 0.7228 & 73 \\
+\{backbone, breathes\} & 0.6832 & 69 \\
+\{backbone, legs\} & 0.6337 & 64 \\
+\{backbone, breathes, legs\} & 0.6337 & 64 \\
+\{toothed\} & 0.6040 & 61 \\
+\bottomrule
+\end{tabular}
+\end{columns}
+
+\begin{block}{Lectura}
+Los itemsets mas frecuentes describen rasgos generales. Son utiles para explorar estructura, pero no necesariamente son las reglas mas informativas.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Filtro 2: confianza minima}
+\begin{block}{Definición}
+\[
+\mathrm{conf}(X \Rightarrow Y) = \frac{\mathrm{supp}(X \cup Y)}{\mathrm{supp}(X)} = P(Y \mid X)
+\]
+\end{block}
+
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{lstlisting}[style=rcode]
+rules <- apriori(trans,
+  parameter = list(
+    support = 0.05,
+    confidence = 0.9))
+
+inspect(head(rules))
+\end{lstlisting}
+
+\column{0.48\textwidth}
+\scriptsize
+\begin{tabular}{llrrr}
+\toprule
+LHS & RHS & supp. & conf. & lift \\
+\midrule
+\{type=insect\} & \{eggs\} & 0.079 & 1.0 & 1.712 \\
+\{type=insect\} & \{legs\} & 0.079 & 1.0 & 1.295 \\
+\{type=insect\} & \{breathes\} & 0.079 & 1.0 & 1.262 \\
+\{type=mollusc...\} & \{eggs\} & 0.089 & 0.9 & 1.541 \\
+\{type=fish\} & \{fins\} & 0.129 & 1.0 & 5.941 \\
+\{type=fish\} & \{aquatic\} & 0.129 & 1.0 & 2.806 \\
+\bottomrule
+\end{tabular}
+\end{columns}
+
+\begin{alertblock}{Cuidado}
+Alta confianza no implica relevancia: puede deberse a que el RHS es muy frecuente.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Filtro 3: lift para evitar reglas triviales}
+\begin{block}{Definición}
+\[
+\mathrm{lift}(X \Rightarrow Y) = \frac{\mathrm{conf}(X \Rightarrow Y)}{\mathrm{supp}(Y)}
+\]
+\end{block}
+
+\begin{columns}[T]
+\column{0.45\textwidth}
+\begin{lstlisting}[style=rcode]
+rules_lift <- sort(rules, by = "lift")
+inspect(head(rules_lift, n = 6))
+\end{lstlisting}
+
+\column{0.51\textwidth}
+\scriptsize
+\begin{tabular}{llrrrr}
+\toprule
+LHS & RHS & supp. & conf. & lift & count \\
+\midrule
+\{eggs, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, aquatic, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, toothed, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, fins, tail\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, backbone, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, aquatic, toothed, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\bottomrule
+\end{tabular}
+\end{columns}
+
+\begin{block}{Interpretacion biologica simple}
+En \texttt{Zoo}, los peces tienen un perfil muy distintivo: \texttt{fins}, \texttt{eggs} y rasgos acuaticos predicen fuertemente \texttt{type=fish}.
+\end{block}
+\end{frame}
+
+%%------------------------------------------------
+%\begin{frame}[fragile]{Resumen: que significa cada metrica?}
+%\scriptsize
+%\begin{tabular}{p{0.20\textwidth}p{0.30\textwidth}p{0.38\textwidth}}
+%\toprule
+%Metrica & Pregunta que responde & Uso para filtrar \\
+%\midrule
+%Soporte & Cuantas transacciones contienen la regla? & Elimina patrones demasiado raros o inestables. \\
+%Confianza & Cuando ocurre el antecedente, cuantas veces ocurre el consecuente? & Busca reglas predictivas, pero puede favorecer RHS frecuentes. \\
+%Coverage & Cuantas transacciones cubre el antecedente? & Evita reglas con antecedente demasiado especifico. \\
+%Lift & La regla mejora sobre el azar o frecuencia basal del RHS? & Prioriza reglas no triviales. Lift $>1$ indica asociacion positiva. \\
+%Count & Numero absoluto de casos que sustentan la regla. & Facilita discutir evidencia con estudiantes. \\
+%\bottomrule
+%\end{tabular}
+%
+%\vspace{0.4cm}
+%\begin{alertblock}{Regla pedagogica}
+%Para ensenar e interpretar, nunca mostrar solo confianza. Mostrar al menos: soporte, confianza, lift y count.
+%\end{alertblock}
+%\end{frame}
+
+%------------------------------------------------
+\section{Filtrado con plantillas}
+\begin{frame}[fragile]{Filtro 4: restringir el RHS con \texttt{appearance}}
+\begin{block}{Motivacion}
+Si el objetivo es interpretar rasgos que predicen el tipo de animal, conviene forzar reglas de la forma:
+\[
+\mathrm{rasgos} \Rightarrow \mathrm{type=animal}
+\]
+\end{block}
+
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{lstlisting}[style=rcode]
+type <- grep("type=", itemLabels(trans),
+             value = TRUE)
+
+type
+
+rules_type <- apriori(
+  trans,
+  appearance = list(rhs = type)
+)
+rules_type
+\end{lstlisting}
+
+\column{0.44\textwidth}
+\begin{lstlisting}[style=out]
+[1] "type=mammal" "type=bird"
+[3] "type=reptile" "type=fish"
+[5] "type=amphibian" "type=insect"
+[7] "type=mollusc.et.al"
+
+writing ... [571 rule(s)]
+
+set of 571 rules
+\end{lstlisting}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Resultado de \texttt{appearance}: reglas orientadas a clase}
+\begin{lstlisting}[style=rcode]
+rules_type |>
+  sort(by = "lift") |>
+  head() |>
+  inspect()
+\end{lstlisting}
+
+\vspace{0.1cm}
+\scriptsize
+\begin{tabular}{llrrrr}
+\toprule
+LHS & RHS & support & confidence & lift & count \\
+\midrule
+\{eggs, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, aquatic, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, toothed, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, fins, tail\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, backbone, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs, aquatic, toothed, fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\bottomrule
+\end{tabular}
+
+\begin{alertblock}{Interpretación}
+El filtro por plantilla elimina reglas como \texttt{type=fish => fins} y enfoca la pregunta en reglas tipo clasificador: rasgos $\Rightarrow$ clase.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Filtro 5: tamaño de la regla}
+\begin{block}{Motivacion}
+Reglas largas suelen tener alta confianza, pero son difíciles de explicar.
+\end{block}
+
+\begin{columns}[T]
+\column{0.48\textwidth}
+\begin{lstlisting}[style=rcode]
+table(size(rules_type))
+
+rules_short <- rules_type[
+  size(rules_type) <= 3
+]
+length(rules_short)
+\end{lstlisting}
+
+\column{0.48\textwidth}
+\begin{lstlisting}[style=out]
+  2   3   4   5   6   7   8   9  10
+  3  29  95 155 150  92  37   9   1
+
+# size <= 3
+[1] 32
+\end{lstlisting}
+\end{columns}
+
+\begin{block}{Lectura}
+\texttt{size(rule)} cuenta LHS + RHS. Si RHS tiene un item, \texttt{size <= 3} equivale aproximadamente a LHS de maximo 2 items.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\section{Redundancia}
+\begin{frame}[fragile]{Filtro 6: reglas redundantes}
+\begin{block}{Definicion operacional}
+Una regla es redundante si existe una regla mas general con igual o mayor confianza.
+\end{block}
+
+\begin{columns}[T]
+\column{0.52\textwidth}
+\small
+Ejemplo:
+\[
+\{eggs, fins\} \Rightarrow \{type=fish\}
+\]
+\[
+\{eggs, aquatic, fins\} \Rightarrow \{type=fish\}
+\]
+Ambas tienen soporte 0.1287 y confianza 1. La segunda agrega \texttt{aquatic}, pero no mejora la regla.
+
+\column{0.44\textwidth}
+\begin{lstlisting}[style=rcode]
+rules_nr <- rules_type[
+  !is.redundant(rules_type)
+]
+
+rules_type
+rules_nr
+\end{lstlisting}
+\begin{lstlisting}[style=out]
+set of 571 rules
+set of 29 rules
+\end{lstlisting}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Efecto del filtro de redundancia}
+\begin{columns}[T]
+\column{0.45\textwidth}
+\begin{lstlisting}[style=rcode]
+table(size(rules_type))
+table(size(rules_nr))
+\end{lstlisting}
+
+\column{0.51\textwidth}
+\begin{lstlisting}[style=out]
+# Antes
+  2   3   4   5   6   7   8   9  10
+  3  29  95 155 150  92  37   9   1
+
+# Despues
+ 2  3  4  5
+ 3 13 10  3
+\end{lstlisting}
+\end{columns}
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=18pt,
+  width=0.72\textwidth, height=0.32\textheight,
+  ylabel={numero de reglas},
+  symbolic x coords={Antes,Despues},
+  xtick=data,
+  ymin=0, ymax=620,
+  nodes near coords,
+  nodes near coords align={vertical},
+]
+\addplot coordinates {(Antes,571) (Despues,29)};
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Reglas no redundantes: ejemplos interpretables}
+\begin{lstlisting}[style=rcode]
+inspect(rules_nr)
+\end{lstlisting}
+
+\vspace{0.1cm}
+\scriptsize
+\begin{tabular}{llrrrr}
+\toprule
+LHS & RHS & support & confidence & lift & count \\
+\midrule
+\{feathers\} & \{type=bird\} & 0.1980 & 1.0000 & 5.050 & 20 \\
+\{milk\} & \{type=mammal\} & 0.4059 & 1.0000 & 2.463 & 41 \\
+\{hair\} & \{type=mammal\} & 0.3861 & 0.9070 & 2.234 & 39 \\
+\{eggs, fins\} & \{type=fish\} & 0.1287 & 1.0000 & 7.769 & 13 \\
+\{fins, tail\} & \{type=fish\} & 0.1287 & 0.8125 & 6.312 & 13 \\
+\{airborne, tail\} & \{type=bird\} & 0.1584 & 0.8889 & 4.489 & 16 \\
+\{airborne, backbone\} & \{type=bird\} & 0.1584 & 0.8889 & 4.489 & 16 \\
+\{hair, catsize\} & \{type=mammal\} & 0.2970 & 1.0000 & 2.463 & 30 \\
+\bottomrule
+\end{tabular}
+
+\begin{alertblock}{Recordar}
+Despues del filtro, las reglas son pocas y semanticas: plumas predicen aves, leche predice mamiferos, huevos+aletas predice peces.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\section{Medidas adicionales}
+\begin{frame}[fragile]{Filtro 7: medidas adicionales con \texttt{interestMeasure}}
+\begin{block}{Por que usar mas metricas?}
+Soporte, confianza y lift no siempre capturan asociacion simetrica o poder discriminativo. \texttt{arules} permite calcular otras medidas, como \texttt{phi} y \texttt{gini}.
+\end{block}
+
+\begin{columns}[T]
+\column{0.50\textwidth}
+\begin{lstlisting}[style=rcode]
+quality(rules) <- cbind(
+  quality(rules),
+  interestMeasure(
+    rules,
+    measure = c("phi", "gini"),
+    trans = trans))
+
+rules |>
+  head(by = "phi") |>
+  inspect()
+\end{lstlisting}
+
+\column{0.46\textwidth}
+\scriptsize
+\begin{tabular}{llrrrrr}
+\toprule
+LHS & RHS & supp. & conf. & lift & phi & gini \\
+\midrule
+\{eggs,fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 1 & 0.224 \\
+\{eggs,aquatic,fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 1 & 0.224 \\
+\{eggs,toothed,fins\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 1 & 0.224 \\
+\bottomrule
+\end{tabular}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Ejemplo de filtro combinado}
+\begin{lstlisting}[style=rcode]
+rules_filtered <- subset(
+  rules,
+  subset = support >= 0.05 &
+           confidence >= 0.9 &
+           lift > 2 &
+           phi > 0.5
+)
+
+rules_filtered <- sort(rules_filtered, by = "lift")
+inspect(head(rules_filtered, n = 10))
+\end{lstlisting}
+
+\begin{block}{Interpretacion}
+Este filtro busca reglas con evidencia minima, alta predictividad, asociacion no trivial y correlacion fuerte entre LHS y RHS.
+\end{block}
+
+\begin{alertblock}{Recomendacion}
+No existe un filtro universal. El filtro debe responder a la pregunta de analisis: exploracion, recomendacion, clasificacion o explicacion.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\section{Items negativos y codificacion}
+\begin{frame}[fragile]{Codificacion: incluir items negativos puede explotar las reglas}
+\begin{columns}[T]
+\column{0.51\textwidth}
+\begin{lstlisting}[style=rcode]
+Zoo_factors <- Zoo_has_legs |>
+  mutate(across(where(is.logical), factor))
+
+trans_factors <- transactions(Zoo_factors)
+trans_factors
+
+r_neg <- apriori(trans_factors)
+r_neg
+print(object.size(r_neg), unit = "Mb")
+\end{lstlisting}
+
+\column{0.45\textwidth}
+\begin{lstlisting}[style=out]
+transactions in sparse format with
+ 101 transactions
+ 39 items
+
+writing ... [1517191 rule(s)]
+
+set of 1517191 rules
+110.2 Mb
+\end{lstlisting}
+\end{columns}
+
+\begin{alertblock}{Interpretacion}
+Convertir TRUE/FALSE a factores crea items como \texttt{milk=FALSE}, \texttt{fins=FALSE}. Esto puede revelar ausencias informativas, pero tambien genera muchas reglas obvias.
+\end{alertblock}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Ejemplo: reglas con items negativos}
+\begin{lstlisting}[style=rcode]
+r_neg |>
+  head(n = 10, by = "lift") |>
+  inspect()
+\end{lstlisting}
+
+\scriptsize
+\begin{tabular}{llrrrr}
+\toprule
+LHS & RHS & support & confidence & lift & count \\
+\midrule
+\{breathes=FALSE, fins=TRUE\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{eggs=TRUE, fins=TRUE\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{milk=FALSE, fins=TRUE\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{breathes=FALSE, fins=TRUE, legs=FALSE\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\{aquatic=TRUE, breathes=FALSE, fins=TRUE\} & \{type=fish\} & 0.1287 & 1 & 7.769 & 13 \\
+\bottomrule
+\end{tabular}
+
+\begin{block}{Cuando usar items negativos}
+Usarlos selectivamente cuando la ausencia tenga sentido: por ejemplo, \texttt{milk=FALSE} puede ayudar a diferenciar peces de mamiferos, pero incluir todas las ausencias puede saturar el analisis.
+\end{block}
+\end{frame}
+
+%------------------------------------------------
+\section{Representaciones compactas}
+\begin{frame}[fragile]{Itemsets cerrados y maximales}
+\begin{block}{Motivacion}
+Antes de mirar reglas, se puede reducir el espacio mirando representaciones compactas de itemsets frecuentes.
+\end{block}
+
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{lstlisting}[style=rcode]
+its <- apriori(trans,
+  parameter = list(target = "frequent",
+                   support = 0.05))
+
+its_closed <- its[is.closed(its)]
+its_max <- its[is.maximal(its)]
+
+c(frequent = length(its),
+  closed = length(its_closed),
+  maximal = length(its_max))
+\end{lstlisting}
+
+\column{0.44\textwidth}
+\begin{lstlisting}[style=out]
+frequent  closed maximal
+    2537     230      22
+\end{lstlisting}
+
+\begin{block}{Lectura}
+\texttt{closed} conserva soporte exacto. \texttt{maximal} conserva solo patrones mas especificos, pero pierde informacion de soporte de subconjuntos.
+\end{block}
+\end{columns}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}[fragile]{Ejemplos de itemsets maximales y cerrados}
+\begin{columns}[T]
+\column{0.47\textwidth}
+\begin{lstlisting}[style=rcode]
+its_max |>
+  head(by = "support") |>
+  inspect()
+\end{lstlisting}
+\scriptsize
+\begin{tabular}{lr}
+\toprule
+Itemset maximal & count \\
+\midrule
+\{hair, milk, predator, toothed, backbone, breathes, legs, tail, catsize, type=mammal\} & 13 \\
+\{eggs, aquatic, predator, toothed, backbone, fins, tail, type=fish\} & 9 \\
+\bottomrule
+\end{tabular}
+
+%\column{0.49\textwidth}
+%\begin{lstlisting}[style=rcode]
+%its_closed |>
+%  head(by = "support") |>
+%  inspect()
+%\end{lstlisting}
+%\scriptsize
+%\begin{tabular}{lrr}
+%\toprule
+%Itemset cerrado & support & count \\
+%\midrule
+%\{backbone\} & 0.8218 & 83 \\
+%\{breathes\} & 0.7921 & 80 \\
+%\{legs\} & 0.7723 & 78 \\
+%\{tail\} & 0.7426 & 75 \\
+%\{backbone, tail\} & 0.7327 & 74 \\
+%\{breathes, legs\} & 0.7228 & 73 \\
+%\bottomrule
+%\end{tabular}
+\end{columns}
+\end{frame}
+
+%\begin{frame}[fragile]{Flujo recomendado para los alumnos}
+%\begin{enumerate}
+%  \item Preparar transacciones: revisar codificacion, items raros y frecuentes.
+%  \item Minar reglas con soporte conservador; bajar soporte solo si se justifica.
+%  \item Ordenar por lift, pero reportar tambien support, confidence, coverage y count.
+%  \item Usar \texttt{appearance} si se busca una clase o consecuente especifico.
+%  \item Filtrar reglas largas: empezar con LHS de 1-2 items.
+%  \item Eliminar redundantes con \texttt{is.redundant()}.
+%  \item Visualizar: item frequency $\rightarrow$ scatter $\rightarrow$ matrix/graph para top reglas.
+%  \item Interpretar semanticamente: descartar reglas obvias o artefactos de codificacion.
+%\end{enumerate}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{Mini-guia de codigo final}
+%\begin{lstlisting}[style=rcode]
+%data(Zoo, package = "mlbench")
+%Zoo_has_legs <- Zoo |> mutate(legs = legs > 0)
+%trans <- transactions(Zoo_has_legs)
+%
+%# Reglas orientadas a clasificacion de tipo animal
+%type <- grep("type=", itemLabels(trans), value = TRUE)
+%rules_type <- apriori(trans, appearance = list(rhs = type))
+%
+%# Medidas adicionales
+%quality(rules_type) <- cbind(
+%  quality(rules_type),
+%  interestMeasure(rules_type, c("phi", "gini"), trans = trans))
+%
+%# Filtro interpretable
+%rules_final <- rules_type[!is.redundant(rules_type)]
+%rules_final <- subset(rules_final,
+%                      subset = lift > 2 & size(rules_final) <= 5)
+%rules_final <- sort(rules_final, by = "lift")
+%inspect(rules_final)
+%
+%# Visualizacion
+%plot(rules_final)
+%plot(rules_final, method = "graph")
+%\end{lstlisting}
+%\end{frame}
+
+
+
+%%------------------------------------------------
+%\section{Mini taller}
+%
+%\begin{frame}{Taller en clase}
+%\begin{enumerate}
+%  \item Minar reglas en \texttt{Groceries} con tres valores de soporte.
+%  \item Filtrar reglas con \texttt{lift > 1.5}, \texttt{count > 50} y \texttt{confidence > 0.5}.
+%  \item Eliminar reglas redundantes.
+%  \item Crear un scatterplot y una matriz agrupada.
+%  \item Escoger 3 reglas y justificar si son accionables o no.
+%\end{enumerate}
+%\end{frame}
+%
+%%------------------------------------------------
+%\begin{frame}[fragile]{Código base del taller}
+%\begin{lstlisting}
+%data("Groceries")
+%
+%rules <- apriori(
+%  Groceries,
+%  parameter = list(support = 0.005, confidence = 0.3, minlen = 2)
+%)
+%
+%quality(rules) <- cbind(
+%  quality(rules),
+%  interestMeasure(rules,
+%                  measure = c("leverage", "conviction", "phi"),
+%                  transactions = Groceries)
+%)
+%
+%rules_clean <- subset(rules, lift > 1.5 & confidence > 0.5 & count > 50)
+%rules_clean <- rules_clean[!is.redundant(rules_clean)]
+%rules_clean <- sort(rules_clean, by = "lift")
+%
+%inspect(head(rules_clean, 10))
+%plot(rules_clean)
+%plot(head(rules_clean, 50), method = "graph")
+%\end{lstlisting}
+%\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Checklist para reportar reglas}
+\begin{enumerate}
+  \item ¿Cómo se codificaron o discretizaron los datos?
+  \item ¿Cuáles fueron los umbrales de soporte, confianza y largo de regla?
+  \item ¿Qué filtros posteriores se aplicaron?
+  \item ¿Se eliminaron reglas redundantes?
+  \item ¿Se revisaron conteos absolutos?
+  \item ¿Se visualizaron patrones globales y no solo reglas individuales?
+  \item ¿La interpretación evita causalidad no justificada?
+\end{enumerate}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Resumen}
+\begin{itemize}
+  \item El valor del análisis de asociación no está solo en minar reglas, sino en filtrarlas e interpretarlas.
+  \item Lift, leverage, conviction, count y significancia ayudan a priorizar reglas.
+  \item Las visualizaciones permiten detectar estructura, redundancia y grupos de reglas.
+  \item La discretización y las jerarquías cambian el espacio de patrones disponibles.
+  \item Un buen informe explica el criterio de selección.
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}{Referencias }
+\footnotesize
+\begin{itemize}
+  \item Michael Hahsler. \textit{An R Companion for Introduction to Data Mining}. Capítulo 5: Association Analysis: Basic Concepts.\\
+  \url{https://mhahsler.github.io/Introduction_to_Data_Mining_R_Examples/book/association-analysis-basic-concepts.html}
+  \item Michael Hahsler. \textit{An R Companion for Introduction to Data Mining}. Capítulo 6: Association Analysis: Advanced Concepts.\\
+  \url{https://mhahsler.github.io/Introduction_to_Data_Mining_R_Examples/book/association-analysis-advanced-concepts.html}
+  \item Hahsler, M., Grün, B., Hornik, K. (2005). \textit{arules: Mining Association Rules and Frequent Itemsets}.
+  \item Hahsler, M. (2017). \textit{arulesViz: Interactive Visualization of Association Rules with R}.
+\end{itemize}
+\end{frame}
+
+\end{document}
