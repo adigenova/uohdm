@@ -193,5 +193,15 @@ Analisis de asociacion 2
 La presentación está disponible [aquí](https://github.com/adigenova/uohdm/blob/main/catedra/analisis_asociacionII.pdf)
 
 
+### Clase 24: 06/07/2026
+
+Repaso Clustering y Analisis de asociacion
+
+### Código
+
+El código visto en clases está [aquí](https://github.com/adigenova/uohdm/blob/main/code/clustering_and_asociacion.Rmd)
+
+
+
 
 

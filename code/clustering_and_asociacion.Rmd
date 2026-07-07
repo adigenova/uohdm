@@ -1,0 +1,935 @@
+---
+title: "Repaso de Clustering y Análisis de Asociación"
+author: "Minería de Datos"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 8,
+  fig.height = 5
+)
+
+# Instalar una vez si es necesario:
+# install.packages(c("tidyverse", "cluster", "factoextra", "arules", "arulesViz"))
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(arules)
+library(arulesViz)
+
+set.seed(123)
+```
+
+# Objetivos del repaso
+
+Este notebook repasa dos familias de métodos usadas en minería de datos:
+
+1. **Clustering**: agrupar observaciones similares sin usar una variable respuesta.
+2. **Análisis de asociación**: encontrar patrones frecuentes del tipo `A => B` en datos categóricos o transaccionales.
+3. **Integración de ambos enfoques**: usar clustering para crear segmentos y luego reglas de asociación para describirlos e interpretarlos.
+
+Al final del notebook se incluyen **ejercicios propuestos**.
+
+# Parte I: Repaso de clustering
+
+## 1. ¿Qué es clustering?
+
+El clustering busca dividir observaciones en grupos de modo que:
+
+- Observaciones dentro del mismo grupo sean similares entre sí.
+- Observaciones de grupos diferentes sean lo más distintas posible.
+
+No existe una variable respuesta verdadera durante el entrenamiento. Por eso, el resultado debe evaluarse con criterios internos, visualización e interpretación del dominio.
+
+Ejemplos de uso:
+
+- Segmentar pacientes según perfiles clínicos.
+- Agrupar tumores según expresión génica.
+- Identificar perfiles de clientes.
+- Detectar patrones morfológicos en imágenes.
+- Reducir complejidad antes de análisis posteriores.
+
+## 2. Datos de ejemplo: iris
+
+Usaremos el dataset `iris`, que contiene cuatro medidas morfológicas de flores y una etiqueta real llamada `Species`. En clustering **no usaremos `Species` para entrenar**, solo para evaluar la coherencia de los grupos.
+
+```{r iris-data}
+data(iris)
+
+glimpse(iris)
+summary(iris)
+```
+
+Seleccionamos solo variables numéricas.
+
+```{r iris-numeric}
+iris_num <- iris %>% 
+  select(where(is.numeric))
+
+head(iris_num)
+```
+
+## 3. Estandarización
+
+La estandarización es clave cuando las variables están en escalas diferentes. Sin estandarizar, variables con valores grandes pueden dominar la distancia.
+
+```{r scale-iris}
+iris_scaled <- scale(iris_num)
+
+summary(iris_scaled)
+```
+
+## 4. Distancia euclidiana
+
+La distancia euclidiana mide qué tan separadas están dos observaciones en el espacio de variables numéricas.
+
+```{r distance-iris}
+d_iris <- dist(iris_scaled, method = "euclidean")
+
+as.matrix(d_iris)[1:5, 1:5]
+```
+
+# K-means
+
+## 5. Ajustar K-means
+
+K-means necesita definir previamente el número de clusters `k`. En este ejemplo usamos `k = 3` porque sabemos que `iris` tiene tres especies, pero en un análisis real deberíamos evaluar varios valores de `k`.
+
+```{r kmeans-iris}
+km3 <- kmeans(iris_scaled, centers = 3, nstart = 25)
+
+km3$centers
+km3$size
+```
+
+Agregamos los clusters al dataset original.
+
+```{r iris-clusters}
+iris_km <- iris %>% 
+  mutate(cluster_kmeans = factor(km3$cluster))
+
+head(iris_km)
+```
+
+## 6. Visualización con PCA
+
+PCA permite proyectar datos multivariados en dos dimensiones para visualizar los clusters.
+
+```{r pca-visualization}
+pca_iris <- prcomp(iris_scaled, center = FALSE, scale. = FALSE)
+
+pca_df <- as_tibble(pca_iris$x[, 1:2]) %>% 
+  mutate(
+    cluster_kmeans = iris_km$cluster_kmeans,
+    Species = iris$Species
+  )
+
+ggplot(pca_df, aes(PC1, PC2, color = cluster_kmeans, shape = Species)) +
+  geom_point(size = 3, alpha = 0.8) +
+  theme_minimal() +
+  labs(
+    title = "Clusters de K-means visualizados con PCA",
+    color = "Cluster",
+    shape = "Especie real"
+  )
+```
+
+## 7. Comparación exploratoria con la etiqueta real
+
+Aunque `Species` no se usó para entrenar, podemos comparar los clusters obtenidos con la clasificación real.
+
+```{r compare-clusters-species}
+table(
+  Cluster = iris_km$cluster_kmeans,
+  Species = iris_km$Species
+)
+```
+
+Interpretación esperada:
+
+- Un buen clustering debería mostrar cierta correspondencia con las especies.
+- Puede haber mezclas entre especies cercanas en el espacio morfológico.
+- La comparación con una etiqueta externa es útil, pero no siempre existe en problemas reales.
+
+# Selección del número de clusters
+
+## 8. Método del codo
+
+El método del codo evalúa la suma de cuadrados dentro de clusters. Buscamos un punto donde agregar más clusters ya no reduzca mucho el error.
+
+```{r elbow-method}
+wss <- map_dbl(1:10, function(k) {
+  kmeans(iris_scaled, centers = k, nstart = 25)$tot.withinss
+})
+
+elbow_df <- tibble(k = 1:10, wss = wss)
+
+ggplot(elbow_df, aes(k, wss)) +
+  geom_line() +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(
+    title = "Método del codo",
+    x = "Número de clusters k",
+    y = "Suma de cuadrados intra-cluster"
+  )
+```
+
+## 9. Silhouette
+
+El índice silhouette compara qué tan bien asignada está cada observación a su cluster. Toma valores entre -1 y 1.
+
+- Valores cercanos a 1: observación bien asignada.
+- Valores cercanos a 0: observación entre dos clusters.
+- Valores negativos: posible mala asignación.
+
+```{r silhouette-k}
+sil_df <- map_dfr(2:10, function(k) {
+  km <- kmeans(iris_scaled, centers = k, nstart = 25)
+  sil <- silhouette(km$cluster, d_iris)
+  tibble(
+    k = k,
+    avg_silhouette = mean(sil[, "sil_width"])
+  )
+})
+
+ggplot(sil_df, aes(k, avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(
+    title = "Selección de k con silhouette promedio",
+    x = "Número de clusters k",
+    y = "Silhouette promedio"
+  )
+```
+
+```{r silhouette-plot}
+sil_k3 <- silhouette(km3$cluster, d_iris)
+fviz_silhouette(sil_k3)
+```
+
+# Clustering jerárquico
+
+## 10. Clustering aglomerativo
+
+El clustering jerárquico comienza con cada observación como un cluster separado y va fusionando los grupos más cercanos.
+
+```{r hierarchical-clustering}
+hc_iris <- hclust(d_iris, method = "ward.D2")
+
+plot(hc_iris, labels = FALSE, hang = -1, main = "Dendrograma - método Ward")
+rect.hclust(hc_iris, k = 3, border = 2:4)
+```
+
+Cortamos el dendrograma en tres grupos.
+
+```{r cut-tree}
+iris_hc <- iris %>% 
+  mutate(cluster_hc = factor(cutree(hc_iris, k = 3)))
+
+table(
+  Cluster = iris_hc$cluster_hc,
+  Species = iris_hc$Species
+)
+```
+
+# Distancia de Gower para datos mixtos
+
+Cuando hay variables numéricas y categóricas juntas, la distancia euclidiana no es adecuada directamente. La distancia de **Gower** permite combinar variables de distinto tipo.
+
+## 11. Ejemplo simple con datos mixtos
+
+```{r mixed-data}
+clientes <- tibble(
+  edad = c(22, 25, 31, 45, 48, 52, 60, 63),
+  ingreso = c(500, 620, 800, 1500, 1700, 1600, 2300, 2500),
+  canal = factor(c("online", "online", "online", "tienda", "tienda", "tienda", "tienda", "tienda")),
+  usa_promocion = factor(c("si", "si", "no", "si", "no", "no", "no", "no"))
+)
+
+clientes
+```
+
+```{r gower-distance}
+d_gower <- daisy(clientes, metric = "gower")
+
+as.matrix(d_gower)[1:5, 1:5]
+```
+
+```{r gower-clustering}
+hc_clientes <- hclust(d_gower, method = "average")
+plot(hc_clientes, main = "Clustering jerárquico con distancia de Gower")
+```
+
+# Interpretación estadística de clusters
+
+Una vez definidos los clusters, podemos preguntarnos qué variables los diferencian.
+
+## 12. Comparación de variables numéricas entre clusters
+
+```{r cluster-summary}
+iris_km %>% 
+  group_by(cluster_kmeans) %>% 
+  summarise(
+    n = n(),
+    across(where(is.numeric), list(media = mean, sd = sd), .names = "{.col}_{.fn}"),
+    .groups = "drop"
+  )
+```
+
+```{r anova-cluster}
+anova_sepal <- aov(Sepal.Length ~ cluster_kmeans, data = iris_km)
+summary(anova_sepal)
+```
+
+## 13. Prueba chi-cuadrado entre cluster y etiqueta externa
+
+```{r chisq-cluster-species}
+tab_cluster_species <- table(iris_km$cluster_kmeans, iris_km$Species)
+tab_cluster_species
+
+chisq.test(tab_cluster_species)
+```
+
+Interpretación:
+
+- Si el valor-p es bajo, hay asociación entre cluster y especie.
+- Esto no prueba que el clustering sea “correcto”, pero indica que los grupos recuperan parte de la estructura biológica conocida.
+
+# Parte II: Análisis de asociación
+
+## 14. Conceptos principales
+
+Una regla de asociación tiene la forma:
+
+\[
+A \Rightarrow B
+\]
+
+Donde:
+
+- `A` es el antecedente o lado izquierdo de la regla.
+- `B` es el consecuente o lado derecho de la regla.
+
+Métricas clave:
+
+- **Soporte**: proporción de transacciones que contienen `A` y `B`.
+- **Confianza**: proporción de transacciones con `A` que también contienen `B`.
+- **Lift**: mide si `A` y `B` aparecen juntos más de lo esperado por azar.
+
+Interpretación rápida de `lift`:
+
+- `lift > 1`: asociación positiva.
+- `lift = 1`: independencia aproximada.
+- `lift < 1`: asociación negativa.
+
+# Datos Groceries
+
+## 15. Cargar transacciones
+
+```{r groceries-data}
+data("Groceries")
+
+Groceries
+inspect(Groceries[1:5])
+```
+
+## 16. Frecuencia de ítems
+
+```{r item-frequency}
+itemFrequencyPlot(
+  Groceries,
+  topN = 20,
+  type = "relative",
+  main = "Top 20 ítems más frecuentes"
+)
+```
+
+## 17. Reglas con Apriori
+
+```{r apriori-basic}
+rules <- apriori(
+  Groceries,
+  parameter = list(
+    supp = 0.001,
+    conf = 0.3,
+    minlen = 2
+  )
+)
+
+rules
+```
+
+```{r inspect-rules}
+rules_lift <- sort(rules, by = "lift", decreasing = TRUE)
+inspect(head(rules_lift, 10))
+```
+
+## 18. Filtrado de reglas
+
+En análisis de asociación no basta con generar muchas reglas. Hay que filtrarlas según una pregunta concreta.
+
+Ejemplo: reglas que predicen compra de `whole milk`.
+
+```{r filter-rules-whole-milk}
+rules_milk <- subset(
+  rules,
+  rhs %in% "whole milk" &
+    lift > 1.2 &
+    confidence > 0.3
+)
+
+rules_milk <- sort(rules_milk, by = "lift", decreasing = TRUE)
+inspect(head(rules_milk, 10))
+```
+
+## 19. Reglas redundantes
+
+Una regla puede ser redundante si entrega información similar a otra regla más general.
+
+```{r redundant-rules}
+is_red <- is.redundant(rules_milk)
+
+table(is_red)
+
+rules_milk_pruned <- rules_milk[!is_red]
+inspect(head(sort(rules_milk_pruned, by = "lift"), 10))
+```
+
+## 20. Visualización de reglas
+
+```{r rules-plot, eval=FALSE}
+# Puede abrir una visualización interactiva dependiendo del entorno.
+plot(rules_milk_pruned, method = "graph", engine = "htmlwidget")
+```
+
+```{r rules-scatter}
+plot(
+  rules_milk_pruned,
+  measure = c("support", "confidence"),
+  shading = "lift"
+)
+```
+
+# Pruebas estadísticas para una regla específica
+
+## 21. Ejemplo: yogurt => whole milk
+
+Queremos evaluar si la presencia de `yogurt` se asocia estadísticamente con la presencia de `whole milk`.
+
+```{r fisher-example}
+M <- as(Groceries, "matrix")
+
+X <- M[, "yogurt"]
+Y <- M[, "whole milk"]
+
+tab <- table(Yogurt = X, WholeMilk = Y)
+tab
+```
+
+```{r fisher-test}
+fisher.test(tab)
+```
+
+```{r chisq-test}
+chisq.test(tab)
+```
+
+Interpretación:
+
+- `fisher.test()` es útil cuando algunas celdas tienen conteos pequeños.
+- `chisq.test()` es una aproximación adecuada cuando los conteos esperados son suficientemente grandes.
+- Un valor-p bajo sugiere que ambos productos no aparecen juntos de forma independiente.
+- El valor-p no reemplaza a soporte, confianza y lift; son perspectivas complementarias.
+
+# Parte III: Integración de clustering y análisis de asociación
+
+## 22. Idea general
+
+Podemos combinar ambos enfoques de la siguiente forma:
+
+1. Crear clusters de observaciones.
+2. Convertir variables relevantes en categorías.
+3. Agregar el cluster como un ítem más.
+4. Minar reglas de asociación que expliquen cada cluster.
+
+Esto permite pasar de un resultado como:
+
+> “El cluster 2 tiene 78 observaciones”
+
+A una interpretación más útil:
+
+> “El cluster 2 se caracteriza por alto ticket promedio, baja sensibilidad a promociones y preferencia por compra presencial”.
+
+# Ejemplo integrado: segmentación de clientes
+
+Simularemos una base de clientes con variables numéricas y categóricas. Luego:
+
+- Aplicaremos clustering con distancia de Gower.
+- Describiremos los clusters.
+- Usaremos reglas de asociación para interpretar los segmentos.
+
+## 23. Simular datos
+
+```{r simulate-clientes}
+set.seed(2026)
+
+n <- 240
+
+clientes_sim <- tibble(
+  edad = c(
+    rnorm(80, mean = 24, sd = 4),
+    rnorm(80, mean = 42, sd = 6),
+    rnorm(80, mean = 61, sd = 5)
+  ),
+  ingreso = c(
+    rnorm(80, mean = 650, sd = 120),
+    rnorm(80, mean = 1400, sd = 250),
+    rnorm(80, mean = 2200, sd = 300)
+  ),
+  visitas_mes = c(
+    rpois(80, lambda = 8),
+    rpois(80, lambda = 4),
+    rpois(80, lambda = 2)
+  ),
+  ticket_promedio = c(
+    rnorm(80, mean = 25, sd = 7),
+    rnorm(80, mean = 55, sd = 12),
+    rnorm(80, mean = 90, sd = 15)
+  ),
+  canal = factor(c(
+    sample(c("online", "mixto"), 80, replace = TRUE, prob = c(0.75, 0.25)),
+    sample(c("online", "mixto", "tienda"), 80, replace = TRUE, prob = c(0.25, 0.45, 0.30)),
+    sample(c("tienda", "mixto"), 80, replace = TRUE, prob = c(0.70, 0.30))
+  )),
+  categoria_fav = factor(c(
+    sample(c("snacks", "bebidas", "tecnologia"), 80, replace = TRUE),
+    sample(c("hogar", "tecnologia", "salud"), 80, replace = TRUE),
+    sample(c("salud", "hogar"), 80, replace = TRUE)
+  )),
+  usa_promocion = factor(c(
+    sample(c("alta", "media"), 80, replace = TRUE, prob = c(0.75, 0.25)),
+    sample(c("media", "baja"), 80, replace = TRUE, prob = c(0.55, 0.45)),
+    sample(c("baja", "media"), 80, replace = TRUE, prob = c(0.80, 0.20))
+  ))
+) %>% 
+  mutate(
+    edad = round(pmax(edad, 18)),
+    ingreso = round(pmax(ingreso, 300)),
+    ticket_promedio = round(pmax(ticket_promedio, 5), 1)
+  )
+
+clientes_sim %>% glimpse()
+```
+
+## 24. Clustering con Gower
+
+Como tenemos variables numéricas y categóricas, usamos distancia de Gower.
+
+```{r clientes-gower}
+d_clientes <- daisy(clientes_sim, metric = "gower")
+
+hc_clientes_sim <- hclust(d_clientes, method = "average")
+
+plot(hc_clientes_sim, labels = FALSE, main = "Dendrograma de clientes con Gower")
+```
+
+## 25. Elegir número de clusters con silhouette
+
+```{r clientes-silhouette}
+sil_clientes <- map_dfr(2:8, function(k) {
+  cl <- cutree(hc_clientes_sim, k = k)
+  sil <- silhouette(cl, d_clientes)
+  tibble(
+    k = k,
+    avg_silhouette = mean(sil[, "sil_width"])
+  )
+})
+
+ggplot(sil_clientes, aes(k, avg_silhouette)) +
+  geom_line() +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(
+    title = "Silhouette promedio para clientes",
+    x = "Número de clusters",
+    y = "Silhouette promedio"
+  )
+```
+
+Para este ejemplo usaremos `k = 3`.
+
+```{r clientes-cluster-final}
+clientes_cluster <- clientes_sim %>% 
+  mutate(cluster = factor(paste0("cluster_", cutree(hc_clientes_sim, k = 3))))
+
+clientes_cluster %>% count(cluster)
+```
+
+## 26. Perfil descriptivo de los clusters
+
+```{r clientes-profile-numeric}
+clientes_cluster %>% 
+  group_by(cluster) %>% 
+  summarise(
+    n = n(),
+    edad_media = mean(edad),
+    ingreso_medio = mean(ingreso),
+    visitas_media = mean(visitas_mes),
+    ticket_medio = mean(ticket_promedio),
+    .groups = "drop"
+  )
+```
+
+```{r clientes-profile-categorical}
+clientes_cluster %>% 
+  count(cluster, canal) %>% 
+  group_by(cluster) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  arrange(cluster, desc(prop))
+```
+
+```{r clientes-plot}
+ggplot(clientes_cluster, aes(ingreso, ticket_promedio, color = cluster)) +
+  geom_point(alpha = 0.75, size = 2.5) +
+  theme_minimal() +
+  labs(
+    title = "Clusters de clientes",
+    x = "Ingreso",
+    y = "Ticket promedio"
+  )
+```
+
+## 27. Convertir variables a transacciones
+
+Para aplicar reglas de asociación, transformamos variables numéricas en categorías.
+
+```{r discretize-helper}
+discretizar_terciles <- function(x) {
+  qs <- unique(quantile(x, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE))
+  
+  if (length(qs) < 4) {
+    cut(x, breaks = 3, labels = c("bajo", "medio", "alto"), include.lowest = TRUE)
+  } else {
+    cut(x, breaks = qs, labels = c("bajo", "medio", "alto"), include.lowest = TRUE)
+  }
+}
+
+clientes_disc <- clientes_cluster %>% 
+  mutate(
+    edad = discretizar_terciles(edad),
+    ingreso = discretizar_terciles(ingreso),
+    visitas_mes = discretizar_terciles(visitas_mes),
+    ticket_promedio = discretizar_terciles(ticket_promedio)
+  )
+
+head(clientes_disc)
+```
+
+Ahora convertimos el data frame discretizado a formato transaccional.
+
+```{r clientes-transactions}
+trans_clientes <- as(clientes_disc, "transactions")
+
+trans_clientes
+inspect(trans_clientes[1:5])
+```
+
+## 28. Reglas para explicar clusters
+
+Buscamos reglas cuyo consecuente sea el cluster. Es decir, queremos reglas del tipo:
+
+\[
+\text{características del cliente} \Rightarrow \text{cluster}
+\]
+
+```{r rules-clientes-clusters}
+cluster_items <- paste0("cluster=cluster_", 1:3)
+
+rules_clientes <- apriori(
+  trans_clientes,
+  parameter = list(
+    supp = 0.05,
+    conf = 0.70,
+    minlen = 2,
+    maxlen = 5
+  ),
+  appearance = list(
+    rhs = cluster_items,
+    default = "lhs"
+  )
+)
+
+rules_clientes <- sort(rules_clientes, by = "lift", decreasing = TRUE)
+
+rules_clientes
+inspect(head(rules_clientes, 15))
+```
+
+## 29. Filtrar reglas por cluster específico
+
+```{r filter-cluster-rules}
+rules_cluster_1 <- subset(rules_clientes, rhs %in% "cluster=cluster_1")
+rules_cluster_2 <- subset(rules_clientes, rhs %in% "cluster=cluster_2")
+rules_cluster_3 <- subset(rules_clientes, rhs %in% "cluster=cluster_3")
+
+inspect(head(sort(rules_cluster_1, by = "lift"), 5))
+inspect(head(sort(rules_cluster_2, by = "lift"), 5))
+inspect(head(sort(rules_cluster_3, by = "lift"), 5))
+```
+
+## 30. Interpretación del ejemplo integrado
+
+Las reglas permiten transformar clusters en descripciones interpretables. Por ejemplo, una regla como:
+
+```text
+{ingreso=alto, ticket_promedio=alto, canal=tienda} => {cluster=cluster_3}
+```
+
+se interpretaría así:
+
+> Los clientes con ingreso alto, ticket promedio alto y preferencia por tienda tienen alta probabilidad de pertenecer al cluster 3.
+
+Lectura de métricas:
+
+- **Soporte**: qué proporción total de clientes cumple la regla completa.
+- **Confianza**: de los clientes con esas características, qué proporción cae en ese cluster.
+- **Lift**: cuánto más frecuente es ese cluster bajo esas características comparado con lo esperado globalmente.
+
+## 31. Visualización de reglas integradas
+
+```{r plot-client-rules}
+plot(
+  rules_clientes,
+  measure = c("support", "confidence"),
+  shading = "lift"
+)
+```
+
+```{r graph-client-rules, eval=FALSE}
+plot(
+  rules_clientes[1:min(20, length(rules_clientes))],
+  method = "graph",
+  engine = "htmlwidget"
+)
+```
+
+# Parte IV: Errores comunes y buenas prácticas
+
+## 32. En clustering
+
+Errores frecuentes:
+
+- Aplicar K-means sin estandarizar variables.
+- Elegir `k` sin justificarlo.
+- Interpretar clusters solo por visualización 2D.
+- Mezclar variables numéricas y categóricas con distancia euclidiana sin procesamiento.
+- Concluir causalidad a partir de clusters.
+
+Buenas prácticas:
+
+- Probar más de un método.
+- Evaluar estabilidad de clusters.
+- Usar silhouette, codo y criterio del dominio.
+- Describir clusters con tablas y gráficos.
+- Validar con variables externas cuando existan.
+
+## 33. En reglas de asociación
+
+Errores frecuentes:
+
+- Quedarse con miles de reglas sin filtrar.
+- Ordenar solo por confianza e ignorar soporte y lift.
+- Usar soportes demasiado bajos y obtener reglas raras.
+- Interpretar reglas como causalidad.
+- No revisar reglas redundantes.
+
+Buenas prácticas:
+
+- Definir una pregunta antes de minar reglas.
+- Filtrar por consecuentes relevantes.
+- Revisar soporte, confianza y lift simultáneamente.
+- Eliminar reglas redundantes.
+- Validar reglas con conocimiento del dominio o pruebas estadísticas simples.
+
+# Parte V: Ejercicios propuestos
+
+## Ejercicio 1: Clustering con `mtcars`
+
+Usa el dataset `mtcars` para realizar un análisis de clustering.
+
+Tareas:
+
+1. Selecciona variables numéricas relevantes.
+2. Estandariza los datos.
+3. Aplica K-means para `k = 2, 3, 4, 5`.
+4. Usa método del codo y silhouette para proponer un valor de `k`.
+5. Visualiza los clusters usando PCA.
+6. Interpreta los clusters usando variables como `mpg`, `wt`, `hp` y `cyl`.
+
+Código inicial:
+
+```{r ejercicio-1, eval=FALSE}
+data(mtcars)
+
+mtcars_df <- mtcars %>% 
+  rownames_to_column("modelo")
+
+# 1. Seleccionar variables
+# 2. Escalar
+# 3. Probar distintos k
+# 4. Visualizar con PCA
+# 5. Interpretar
+```
+
+## Ejercicio 2: Clustering jerárquico y distancia de Gower
+
+Construye una base simulada con pacientes que tenga:
+
+- Edad.
+- IMC.
+- Sexo.
+- Grupo clínico.
+- Presencia/ausencia de una condición.
+
+Tareas:
+
+1. Calcula distancia de Gower.
+2. Aplica clustering jerárquico.
+3. Evalúa `k = 2` a `k = 6` con silhouette.
+4. Describe los clusters obtenidos.
+5. Evalúa si hay asociación entre cluster y grupo clínico usando chi-cuadrado.
+
+Código inicial:
+
+```{r ejercicio-2, eval=FALSE}
+set.seed(101)
+
+pacientes <- tibble(
+  edad = round(rnorm(120, 55, 12)),
+  imc = round(rnorm(120, 27, 4), 1),
+  sexo = factor(sample(c("F", "M"), 120, replace = TRUE)),
+  grupo_clinico = factor(sample(c("control", "leve", "severo"), 120, replace = TRUE)),
+  condicion = factor(sample(c("si", "no"), 120, replace = TRUE))
+)
+
+# Calcular Gower
+# Hacer clustering jerárquico
+# Evaluar silhouette
+# Interpretar clusters
+```
+
+## Ejercicio 3: Reglas de asociación con `Groceries`
+
+Usa el dataset `Groceries`.
+
+Tareas:
+
+1. Genera reglas con distintos valores de soporte y confianza.
+2. Compara cuántas reglas se obtienen en cada configuración.
+3. Filtra reglas que tengan `whole milk` como consecuente.
+4. Ordena por lift.
+5. Elimina reglas redundantes.
+6. Interpreta las cinco reglas más relevantes.
+
+Código inicial:
+
+```{r ejercicio-3, eval=FALSE}
+data("Groceries")
+
+rules_groc <- apriori(
+  Groceries,
+  parameter = list(supp = 0.002, conf = 0.4, minlen = 2)
+)
+
+# Filtrar por rhs = "whole milk"
+# Ordenar por lift
+# Eliminar redundantes
+# Interpretar
+```
+
+## Ejercicio 4: Prueba estadística de una regla
+
+Selecciona una regla de asociación de `Groceries`, por ejemplo:
+
+```text
+{butter} => {whole milk}
+```
+
+Tareas:
+
+1. Construye una tabla 2x2 con presencia/ausencia de ambos productos.
+2. Aplica `fisher.test()`.
+3. Aplica `chisq.test()`.
+4. Compara el valor-p con lift, soporte y confianza de la regla.
+5. Explica por qué valor-p y lift responden preguntas distintas.
+
+Código inicial:
+
+```{r ejercicio-4, eval=FALSE}
+M <- as(Groceries, "matrix")
+
+X <- M[, "butter"]
+Y <- M[, "whole milk"]
+
+tab <- table(Butter = X, WholeMilk = Y)
+
+fisher.test(tab)
+chisq.test(tab)
+```
+
+## Ejercicio 5: Integración clustering + reglas de asociación
+
+Usa el ejemplo de `clientes_sim` o crea una base propia.
+
+Tareas:
+
+1. Genera clusters usando variables numéricas y categóricas.
+2. Selecciona el número de clusters con silhouette.
+3. Discretiza variables numéricas.
+4. Convierte la tabla a transacciones.
+5. Mina reglas del tipo `características => cluster`.
+6. Interpreta al menos tres reglas por cluster.
+7. Discute si las reglas ayudan a explicar mejor los clusters que las tablas descriptivas.
+
+Código inicial:
+
+```{r ejercicio-5, eval=FALSE}
+# Puedes reutilizar clientes_sim del notebook.
+
+# 1. Calcular distancia de Gower
+# 2. Clustering jerárquico
+# 3. Cortar en k clusters
+# 4. Discretizar variables numéricas
+# 5. Convertir a transactions
+# 6. Aplicar apriori con rhs = cluster
+# 7. Interpretar reglas
+```
+
+# Preguntas de repaso conceptual
+
+1. ¿Por qué es importante estandarizar antes de usar K-means?
+2. ¿Qué diferencia hay entre K-means y clustering jerárquico?
+3. ¿Cuándo usarías distancia de Gower?
+4. ¿Qué significa un silhouette negativo?
+5. ¿Por qué una regla con alta confianza no necesariamente es interesante?
+6. ¿Qué significa `lift > 1`?
+7. ¿Por qué no debemos interpretar una regla de asociación como causalidad?
+8. ¿Cómo puede ayudar el análisis de asociación a interpretar clusters?
+9. ¿Qué diferencia hay entre evaluar clusters con silhouette y evaluarlos con una variable externa?
+10. En un dataset biomédico, ¿qué precauciones tomarías antes de interpretar clusters como subtipos biológicos?
+
